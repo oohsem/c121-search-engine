@@ -64,3 +64,80 @@ def save_partial_index(index, partial_dir, partial_number):
 
     return partial_path
 
+def merge_partial_indexes(partial_files, final_path):
+
+    merged_term_count = 0
+
+    # Open all partial index files.
+    with ExitStack() as stack:
+
+        files = []
+
+        for partial_path in partial_files:
+            file = stack.enter_context(
+                open(partial_path, "r", encoding="utf-8")
+            )
+            files.append(file)
+
+        # The heap keeps the next term from each file.
+        heap = []
+
+        # Read the first record from each partial index.
+        for file_number, file in enumerate(files):
+
+            line = file.readline()
+
+            if line:
+                record = json.loads(line)
+
+                heapq.heappush(
+                    heap,
+                    (record["term"], file_number, record["postings"])
+                )
+
+        # Write the merged index.
+        with open(final_path, "w", encoding="utf-8") as output:
+
+            while heap:
+
+                # Get the alphabetically smallest term.
+                current_term = heap[0][0]
+
+                merged_postings = {}
+
+                # Collect postings for the same term.
+                while heap and heap[0][0] == current_term:
+
+                    term, file_number, postings = heapq.heappop(heap)
+
+                    # Add this partial index's postings.
+                    merged_postings.update(postings)
+
+                    # Read the next record from that file.
+                    line = files[file_number].readline()
+
+                    if line:
+                        record = json.loads(line)
+
+                        heapq.heappush(
+                            heap,
+                            (
+                                record["term"],
+                                file_number,
+                                record["postings"]
+                            )
+                        )
+
+                # Write the merged term and its postings.
+                record = {
+                    "term": current_term,
+                    "postings": merged_postings
+                }
+
+                output.write(
+                    json.dumps(record, ensure_ascii=False) + "\n"
+                )
+
+                merged_term_count += 1
+
+    return merged_term_count
