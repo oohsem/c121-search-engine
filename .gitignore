@@ -1,2 +1,13 @@
+__pycache__/
+*.pyc
+
+venv/
+.venv/
+
 dataset/
 
+partial_indexes/
+final_index/
+
+.vscode/
+.idea/
