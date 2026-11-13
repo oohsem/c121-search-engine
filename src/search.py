@@ -46,7 +46,9 @@ def get_postings(term) -> dict[str, dict[str, int]]:
 
     return json.loads(line)['postings']
 
-def search(query):
+doc_urls = load_documents()
+
+def search(query, top_k=5):
     clean_terms = list(dict.fromkeys(process_text(query))) #list(dict.fromkeys()) removes dupes
     
     if not clean_terms:
@@ -63,6 +65,10 @@ def search(query):
     matches = set(all_posts[0])
     for posts in all_posts[1:]:
         matches &= set(posts)
-        if not matches: return [] #return early
+        if not matches: 
+            return [] 
+
     
-    return
+    urls = [doc_urls[i] for i in matches] # dont use get, use [i] because we need it to fail loudly to bugtest, once we are done, we revert back to get()
+    return urls[:top_k]
+
