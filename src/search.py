@@ -9,6 +9,14 @@ INDEX_PATH = FINAL_DIR / "index.jsonl"
 
 DOCUMENTS_PATH = FINAL_DIR / "documents.jsonl"
 
+LEXICON_PATH = FINAL_DIR / "lexicon.json"
+
+#runs once, when this file is imported. Need to remember to close it
+with open(LEXICON_PATH, 'r', encoding='utf-8') as file:
+    lexicon = json.load(file)
+
+idx_file = open(INDEX_PATH, 'rb')
+
 def load_documents():
     doc_urls = dict()
     with open(DOCUMENTS_PATH, 'r', encoding='utf-8') as file:
@@ -17,17 +25,20 @@ def load_documents():
                 continue
 
             record = json.loads(line)
-            doc_urls[record['doc_id']] = record['url']
+            doc_urls[str(record['id'])] = record['url']
 
     return doc_urls
 
 
 def get_postings(term):
-    idx_path = Path(INDEX_PATH)
-    with open(idx_path, 'r', encoding='utf-8') as file:
-        
+    offset = lexicon.get(term)
+    if offset is None:
+        return {}
 
-    return
+    idx_file.seek(offset)
+    line = idx_file.readline()
+
+    return json.loads(line)['postings']
 
 def search(query):
     return
