@@ -22,11 +22,10 @@ def load_documents():
     return doc_urls
 
 
-def get_postings():
-
+def get_postings(term):
     idx_path = Path(INDEX_PATH)
     with open(idx_path, 'r', encoding='utf-8') as file:
-        data = [json.loads(line) for line in file if line.strip()]
+        
 
     return
 

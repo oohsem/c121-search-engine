@@ -189,10 +189,10 @@ def main():
             all_text, important_text = parse_html(html)
 
             # Add document terms to the inverted index.
-            build_index(all_text, important_text, doc_id, inverted_index)
+            build_index(all_text, important_text, document_count, inverted_index)
 
             # Save document metadata.
-            doc_record = {"doc_id": doc_id, "url": url}
+            doc_record = {'id': document_count, "doc_id": doc_id, "url": url}
 
             doc_file.write(json.dumps(doc_record, ensure_ascii=False) + "\n")
 
