@@ -13,7 +13,7 @@ from tokenizer import process_text
 DOCS_PER_PARTIAL = 5000
 
 
-def build_index(all_text, important_text, doc_id, index):
+def build_index(all_text, important_text, doc_num, index):
 
     # Process all text in the document.
     tokens = process_text(all_text)
@@ -35,7 +35,7 @@ def build_index(all_text, important_text, doc_id, index):
             index[term] = {}
 
         # Store the document ID and term frequencies.
-        index[term][doc_id] = {
+        index[term][doc_num] = {
             "tf": frequency,
             "important_tf": important_frequencies.get(term, 0)
         }
@@ -64,7 +64,7 @@ def save_partial_index(index, partial_dir, partial_number):
 
     return partial_path
 
-def merge_partial_indexes(partial_files, final_path):
+def merge_partial_indexes(partial_files, final_path, lexicon_path):
 
     merged_term_count = 0
 
@@ -95,8 +95,11 @@ def merge_partial_indexes(partial_files, final_path):
                     (record["term"], file_number, record["postings"])
                 )
 
+        lexicon = {}
+        offset = 0
+        
         # Write the merged index.
-        with open(final_path, "w", encoding="utf-8") as output:
+        with open(final_path, "wb") as output:
 
             while heap:
 
@@ -134,10 +137,16 @@ def merge_partial_indexes(partial_files, final_path):
                     "postings": merged_postings
                 }
 
-                output.write(
-                    json.dumps(record, ensure_ascii=False) + "\n"
-                )
+                line = (json.dumps(record, ensure_ascii=False) + "\n").encode('utf-8')
+                lexicon[current_term] = offset
+                output.write(line)
+                offset += len(line)
 
                 merged_term_count += 1
 
+        with open(lexicon_path, 'w', encoding='utf-8') as lex_file:
+            lex_file.write(
+                json.dumps(lexicon, ensure_ascii=False)
+            )
+            
     return merged_term_count

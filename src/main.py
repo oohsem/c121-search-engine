@@ -16,6 +16,8 @@ FINAL_INDEX_PATH = FINAL_DIR / "index.jsonl"
 
 DOCUMENTS_PATH = FINAL_DIR / "documents.jsonl"
 
+LEXICON_PATH = FINAL_DIR/ 'lexicon.json'
+
 REPORT_PATH = FINAL_DIR / "milestone1_report.txt"
 
 
@@ -115,6 +117,7 @@ def generate_report(document_count,unique_token_count,partial_count,skipped_coun
 
     report.append(str(FINAL_INDEX_PATH))
     report.append(str(DOCUMENTS_PATH))
+    report.append(str(LEXICON_PATH))
 
     # Write the report to a text file.
     with open(REPORT_PATH, "w", encoding="utf-8") as file:
@@ -240,12 +243,12 @@ def main():
     # Merge the partial indexes.
     print("\nMerging partial indexes...")
 
-    unique_token_count = merge_partial_indexes(partial_files, FINAL_INDEX_PATH)
+    unique_token_count = merge_partial_indexes(partial_files, FINAL_INDEX_PATH, LEXICON_PATH)
 
     print("Merging complete.")
 
     # Calculate the total size of the final index files.
-    index_size_bytes = (FINAL_INDEX_PATH.stat().st_size+ DOCUMENTS_PATH.stat().st_size)
+    index_size_bytes = (FINAL_INDEX_PATH.stat().st_size + DOCUMENTS_PATH.stat().st_size + LEXICON_PATH.stat().st_size)
 
     index_size_kb = index_size_bytes / 1024
 
