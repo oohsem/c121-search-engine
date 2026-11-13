@@ -6,7 +6,7 @@ from indexer import DOCS_PER_PARTIAL, build_index, save_partial_index, merge_par
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
-DATASET_DIR = PROJECT_DIR / "developer" / "DEV"
+DATASET_DIR = PROJECT_DIR / "dataset"
 
 FINAL_DIR = PROJECT_DIR / "final_index"
 
