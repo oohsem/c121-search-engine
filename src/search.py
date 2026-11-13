@@ -72,3 +72,13 @@ def search(query, top_k=5):
     urls = [doc_urls[i] for i in matches] # dont use get, use [i] because we need it to fail loudly to bugtest, once we are done, we revert back to get()
     return urls[:top_k]
 
+if __name__ == '__main__':
+    while True:
+        query = input("Give Query: ").strip()
+        if not query:
+            break
+
+        results = search(query)
+
+        for rank, url in enumerate(results):
+            print(rank, '. ', url)
