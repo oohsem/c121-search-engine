@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+from tokenizer import process_text
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
@@ -17,7 +18,9 @@ with open(LEXICON_PATH, 'r', encoding='utf-8') as file:
 
 idx_file = open(INDEX_PATH, 'rb')
 
-def load_documents():
+def load_documents() -> dict[str, str]:
+    #returns dict('doc_num', 'url')
+    # ex. {'0': 'some_url', '1': 'another_url'}
     doc_urls = dict()
     with open(DOCUMENTS_PATH, 'r', encoding='utf-8') as file:
         for line in file:
@@ -30,7 +33,10 @@ def load_documents():
     return doc_urls
 
 
-def get_postings(term):
+def get_postings(term) -> dict[str, dict[str, int]]:
+    # returns {'doc_num': {'tf': x, 'important_tf': y}}
+    # ex. {'2': {'tf': 5, 'important_tf': 1}, '19': {'tf': 20, 'important_tf': 6}} 
+    # obv only returns the docs and its nums with the term
     offset = lexicon.get(term)
     if offset is None:
         return {}
@@ -41,4 +47,11 @@ def get_postings(term):
     return json.loads(line)['postings']
 
 def search(query):
-    return
+    clean_terms = list(dict.fromkeys(process_text(query))) #list(dict.fromkeys()) removes dupes
+    
+    if not clean_terms:
+        return []
+
+    for term in clean_terms:
+        get_postings(term)
+    return clean_terms
