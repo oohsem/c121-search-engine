@@ -10,10 +10,14 @@ INDEX_PATH = FINAL_DIR / "index.jsonl"
 DOCUMENTS_PATH = FINAL_DIR / "documents.jsonl"
 
 def load_documents():
-    doc_path = Path(DOCUMENTS_PATH)
+    doc_urls = dict()
+    with open(DOCUMENTS_PATH, 'r', encoding='utf-8') as file:
+        for line in file:
+            if not line.strip():
+                continue
 
-    with open(doc_path, 'r', encoding='utf-8') as file:
-        doc_urls = [json.loads(line) for line in file if line.strip()]
+            record = json.loads(line)
+            doc_urls[record['doc_id']] = record['url']
 
     return doc_urls
 
