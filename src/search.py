@@ -52,6 +52,17 @@ def search(query):
     if not clean_terms:
         return []
 
+    all_posts = []
     for term in clean_terms:
-        get_postings(term)
-    return clean_terms
+        postings = get_postings(term)
+        if not postings:
+            return []
+        all_posts.append(postings)
+
+    all_posts.sort(key=len)
+    matches = set(all_posts[0])
+    for posts in all_posts[1:]:
+        matches &= set(posts)
+        if not matches: return [] #return early
+    
+    return
