@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from urllib.parse import urldefrag
 from parser import parse_html
+from optimize import optimize
 from indexer import DOCS_PER_PARTIAL, build_index, save_partial_index, merge_partial_indexes
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -267,6 +268,9 @@ def main():
     generate_report(document_count, unique_token_count, partial_count, skipped_count,index_size_kb)
 
     print("\nFinal index saved at:", FINAL_INDEX_PATH)
+
+    # Build the compact disk-backed index required by Milestone 3.
+    optimize(FINAL_DIR)
 
 
 if __name__ == "__main__":
