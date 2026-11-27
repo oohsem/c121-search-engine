@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 
-from compact_format import DOCUMENT_LENGTH, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for
+from compact_format import DOCUMENT_LENGTH, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for, source_signature
 
 from index_storage import resolve_index_dir
 
@@ -48,6 +48,12 @@ class IndexReader:
                 manifest = json.loads((compact / "manifest.json").read_text(encoding="utf-8"))
                 compact_version = manifest["version"]
                 postings_count = manifest["postings"]
+                original = directory / "index.jsonl"
+                if original.is_file() and any(
+                    manifest.get(key) != value
+                    for key, value in source_signature(original, directory / "documents.jsonl").items()
+                ):
+                    raise ValueError("the compact index is outdated")
                 if (compact_version not in SUPPORTED_VERSIONS or manifest["documents"] != len(doc_urls)
                         or type(postings_count) is not int or postings_count < 0):
                     raise ValueError("incompatible compact index manifest")
@@ -74,6 +80,7 @@ class IndexReader:
 
         self.directory = directory
         self.lexicon = lexicon
+        self.manifest = manifest if compact is not None else {}
         self.compact = compact
         self.compact_version = compact_version
         self.postings_size = postings_size
@@ -182,3 +189,18 @@ class IndexReader:
             return self.doc_urls[doc_id]
         except KeyError as error:
             raise IndexArtifactError(f"Unknown document ID {doc_id} in {self.directory}") from error
+
+
+
+class CompactIndexReader(IndexReader):
+    """Compatibility entry point for callers requiring compact postings."""
+
+    def __enter__(self):
+        super().__enter__()
+        try:
+            self.lengths = tuple(self.document_lengths())
+            self.avg_length = max(1.0, self.manifest["average_length"])
+        except (IndexArtifactError, KeyError, TypeError):
+            self.__exit__(None, None, None)
+            raise IndexArtifactError("Cannot open compact postings. Rebuild the index.") from None
+        return self

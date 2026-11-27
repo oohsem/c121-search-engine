@@ -3,7 +3,13 @@ from heapq import nsmallest
 from pathlib import Path
 from time import perf_counter
 
-from ranking import DEFAULT_IMPORTANT_BOOST, DEFAULT_SHORT_PAGE_FLOOR, Ranker
+from ranking import (
+    DEFAULT_IMPORTANT_BOOST,
+    DEFAULT_SHORT_PAGE_FLOOR,
+    Ranker,
+    document_weight,
+    tf_idf,
+)
 from search_index import DEFAULT_INDEX_DIR, IndexArtifactError, IndexReader
 from snippets import matching_excerpt
 from tokenizer import process_text
@@ -13,16 +19,38 @@ QUERY_LIMIT_MS = 300.0
 
 
 def search(query, top_k=5, *, index=None):
+    if not query.strip() or top_k <= 0:
+        return []
+    if index is None:
+        with IndexReader() as reader:
+            return Ranker(reader).search(query, top_k)
+    return Ranker(index).search(query, top_k)
+
+
+def search_terms(terms, top_k, index):
+    if not terms or top_k <= 0:
+        return []
+    ranker = Ranker(index)
+    return [index.document_url(str(doc)) for doc, _ in ranker.ranked_terms(terms, top_k)]
+
+
+def calculate_tfidf(tf, important_tf, df, total_docs):
+    return document_weight(tf, important_tf, DEFAULT_IMPORTANT_BOOST) * tf_idf(1, total_docs, df)
+
+
+def boolean_search(query, top_k=5, *, index=None):
     terms = list(dict.fromkeys(process_text(query)))
     if not terms:
         return []
     if index is None:
         with IndexReader() as reader:
-            return search_terms(terms, top_k, reader)
-    return search_terms(terms, top_k, index)
+            return boolean_search_terms(terms, top_k, reader)
+    return boolean_search_terms(terms, top_k, index)
 
 
-def search_terms(terms, top_k, index):
+def boolean_search_terms(terms, top_k, index):
+    if not terms or top_k <= 0:
+        return []
     if index.compact is not None:
         plan = []
         for term in terms:
@@ -88,7 +116,7 @@ def main(argv=None, *, boolean=False):
                 if not query:
                     break
                 if ranker is None:
-                    results = [(url, "") for url in search(query, index=index)]
+                    results = [(url, "") for url in boolean_search(query, index=index)]
                 elif dataset is None:
                     results = [(url, "") for url in ranker.search(query)]
                 else:

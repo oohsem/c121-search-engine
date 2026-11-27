@@ -85,10 +85,10 @@ class Ranker:
                 raise IndexArtifactError("Invalid document norm or important-text boost.")
             self.norms.append(sqrt(squared_norm))
 
-    def _plan_query(self, query):
+    def _plan_query(self, terms):
         collection_size = len(self.norms)
         plan = []
-        for term, frequency in query_terms(query, self.filter_stopwords).items():
+        for term, frequency in terms.items():
             location = self.index.posting_range(term)
             if location is None:
                 continue
@@ -98,8 +98,8 @@ class Ranker:
         plan.sort(key=lambda item: (item[1][1], item[0]))
         return plan
 
-    def _score_query(self, query):
-        plan = self._plan_query(query)
+    def _score_query(self, terms):
+        plan = self._plan_query(terms)
         if not plan:
             return {}, {}
         query_norm = sqrt(sum(weight * weight for _, _, weight in plan))
@@ -120,14 +120,28 @@ class Ranker:
                 scores[doc] *= self.content_weights[doc]
         return scores, matches or {}
 
+    def ranked_terms(self, terms, top_k=5):
+        if top_k <= 0:
+            return []
+        scores, matches = self._score_query(Counter(terms))
+
+        # Prefer complete matches, then cosine, then numeric document ID.
+        def order(item):
+            doc, score = item
+            return -matches.get(doc, 0), -score, doc
+
+        best_by_url = {}
+        for item in scores.items():
+            url = self.index.document_url(str(item[0]))
+            if not url:
+                continue
+            previous = best_by_url.get(url)
+            if previous is None or order(item) < order(previous):
+                best_by_url[url] = item
+        return nsmallest(top_k, best_by_url.values(), key=order)
+
     def ranked_documents(self, query, top_k=5):
-        scores, matches = self._score_query(query)
-        # Rank full matches first and fill remaining slots with progressively
-        # fewer terms. Cosine and numeric document ID order each tier.
-        return nsmallest(
-            top_k, scores.items(),
-            key=lambda item: (-matches.get(item[0], 0), -item[1], item[0]),
-        )
+        return self.ranked_terms(query_terms(query, self.filter_stopwords), top_k)
 
     def search(self, query, top_k=5):
         return [self.index.document_url(str(doc)) for doc, _ in self.ranked_documents(query, top_k)]

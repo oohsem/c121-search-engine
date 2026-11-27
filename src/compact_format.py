@@ -20,3 +20,10 @@ def bucket_for(term):
 def lexicon_row(term, offset, df):
     row = json.dumps([term, offset, df], ensure_ascii=False, separators=(",", ":"))
     return (row + "\n").encode("utf-8")
+
+
+def source_signature(postings, documents):
+    postings_stat = postings.stat()
+    documents_stat = documents.stat()
+    return {"source_size": postings_stat.st_size, "source_mtime_ns": postings_stat.st_mtime_ns,
+            "documents_size": documents_stat.st_size, "documents_mtime_ns": documents_stat.st_mtime_ns}

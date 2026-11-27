@@ -11,7 +11,7 @@ import shutil
 import struct
 import tempfile
 
-from compact_format import BUCKETS, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for, lexicon_row
+from compact_format import BUCKETS, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for, lexicon_row, source_signature
 from index_storage import resolve_index_dir
 from ranking import document_weights
 
@@ -24,13 +24,6 @@ def flush_bucket(path, buffer):
         with path.open("ab") as bucket:
             bucket.write(buffer)
         buffer.clear()
-
-
-def source_signature(postings, documents):
-    postings_stat = postings.stat()
-    documents_stat = documents.stat()
-    return {"source_size": postings_stat.st_size, "source_mtime_ns": postings_stat.st_mtime_ns,
-            "documents_size": documents_stat.st_size, "documents_mtime_ns": documents_stat.st_mtime_ns}
 
 
 def optimize(index_dir):
