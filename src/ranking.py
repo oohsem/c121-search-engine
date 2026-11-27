@@ -2,6 +2,7 @@
 from array import array
 from collections import Counter
 from functools import lru_cache
+from heapq import nsmallest
 from math import isfinite, log10, sqrt
 
 from search_index import IndexArtifactError
@@ -83,7 +84,7 @@ class Ranker:
 
     def ranked_documents(self, query, top_k=5):
         scores = self.scores(query)
-        return sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+        return nsmallest(top_k, scores.items(), key=lambda item: (-item[1], item[0]))
 
     def search(self, query, top_k=5):
         return [self.index.document_url(str(doc)) for doc, _ in self.ranked_documents(query, top_k)]
