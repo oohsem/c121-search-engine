@@ -5,6 +5,7 @@ from time import perf_counter
 
 from ranking import (
     DEFAULT_IMPORTANT_BOOST,
+    DEFAULT_PAGERANK_WEIGHT,
     DEFAULT_SHORT_PAGE_FLOOR,
     Ranker,
     document_weight,
@@ -89,6 +90,8 @@ def main(argv=None, *, boolean=False):
                         help="Keep every word from the ranked query.")
     parser.add_argument("--important-boost", type=float, default=DEFAULT_IMPORTANT_BOOST,
                         help="Weight given to words in titles, headings, and bold text.")
+    parser.add_argument("--pagerank-weight", type=float, default=DEFAULT_PAGERANK_WEIGHT,
+                        help="Weight of offline link authority; 0 uses text relevance alone.")
     parser.add_argument("--short-page-floor", type=int, default=DEFAULT_SHORT_PAGE_FLOOR,
                         help="Token threshold for the short-page penalty; 0 disables it.")
     parser.add_argument("--snippets", action="store_true",
@@ -105,6 +108,7 @@ def main(argv=None, *, boolean=False):
             ranker = None if args.boolean else Ranker(
                 index, important_boost=args.important_boost,
                 filter_stopwords=not args.keep_stopwords, short_page_floor=args.short_page_floor,
+                pagerank_weight=args.pagerank_weight,
             )
             while True:
                 try:

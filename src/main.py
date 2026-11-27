@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from index_storage import publish_generation
 from parser import parse_html
+from pagerank import PageLinks, write_pagerank
 from optimize import optimize
 from indexer import (
     DOCS_PER_PARTIAL,
@@ -188,6 +189,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
     index_path = final_dir / "index.jsonl"
     documents_path = final_dir / "documents.jsonl"
     lexicon_path = final_dir / "lexicon.json"
+    links_path = partial_dir / "links.jsonl"
 
     print("Build mode:", "smoke" if max_docs is not None else "full")
     print("Dataset:", dataset_dir)
@@ -207,7 +209,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
         documents_path,
         "w",
         encoding="utf-8"
-    ) as doc_file:
+    ) as doc_file, links_path.open("w", encoding="utf-8", newline="\n") as link_file:
 
         for file_path in dataset_dir.rglob("*.json"):
 
@@ -236,7 +238,8 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
             doc_id = document["doc_id"]
             url = document["url"]
-            all_text, important_text = parse_html(document.pop("content"))
+            links = PageLinks(url)
+            all_text, important_text = parse_html(document.pop("content"), on_link=links.add)
             if not all_text or all_text.isspace():
                 skipped_by_reason["empty_content"] += 1
                 continue
@@ -250,6 +253,8 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
             doc_record = {'id': document_count, "doc_id": doc_id, "url": url}
 
             doc_file.write(json.dumps(doc_record, ensure_ascii=False) + "\n")
+            link_file.write(json.dumps(links.targets(), ensure_ascii=False) + "\n")
+            del links
 
             document_count += 1
 
@@ -321,6 +326,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
     # Build the compact disk-backed index required by Milestone 3.
     optimize(final_dir)
+    write_pagerank(documents_path, links_path, final_dir / "optimized" / "pagerank.bin")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from tokenizer import process_text
 
 
 DEFAULT_IMPORTANT_BOOST = 0.35
+DEFAULT_PAGERANK_WEIGHT = 0.08
 DEFAULT_SHORT_PAGE_FLOOR = 85
 
 
@@ -62,12 +63,20 @@ class Ranker:
     """Rank matches with the course's lnc.ltc weighting."""
 
     def __init__(self, index, *, important_boost=DEFAULT_IMPORTANT_BOOST, filter_stopwords=True,
-                 prefer_coverage=True, short_page_floor=DEFAULT_SHORT_PAGE_FLOOR):
+                 prefer_coverage=True, short_page_floor=DEFAULT_SHORT_PAGE_FLOOR,
+                 pagerank_weight=DEFAULT_PAGERANK_WEIGHT):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
         if type(short_page_floor) is not int or short_page_floor < 0:
             raise ValueError("The short-page threshold must be a nonnegative integer.")
+        if not isfinite(pagerank_weight) or not 0.0 <= pagerank_weight <= 1.0:
+            raise ValueError("PageRank weight must be between zero and one.")
         self.index = index
+        authority = index.pagerank_scores() if pagerank_weight else None
+        self.authority_bonus = (
+            array("d", (pagerank_weight * rank / (1.0 + rank) for rank in authority))
+            if authority is not None else None
+        )
         self.important_boost = important_boost
         self.filter_stopwords = filter_stopwords
         self.prefer_coverage = prefer_coverage
@@ -118,6 +127,8 @@ class Ranker:
             scores[doc] /= self.norms[doc]
             if self.content_weights is not None:
                 scores[doc] *= self.content_weights[doc]
+            if self.authority_bonus is not None:
+                scores[doc] += self.authority_bonus[doc]
         return scores, matches or {}
 
     def ranked_terms(self, terms, top_k=5):

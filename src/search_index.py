@@ -1,10 +1,22 @@
 """Read postings and document metadata from one index generation."""
 import json
+from array import array
 from functools import lru_cache
+from math import isfinite
 from pathlib import Path
+from sys import byteorder
 from threading import Lock
 
-from compact_format import DOCUMENT_LENGTH, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for, source_signature
+from compact_format import (
+    DOCUMENT_LENGTH,
+    NORM_COMPONENTS,
+    PAGERANK_SCORE,
+    POSTING,
+    SUPPORTED_VERSIONS,
+    VERSION,
+    bucket_for,
+    source_signature,
+)
 
 from index_storage import resolve_index_dir
 
@@ -183,6 +195,26 @@ class IndexReader:
             return (length for length, in DOCUMENT_LENGTH.iter_unpack(data))
         except (OSError, ValueError) as error:
             raise IndexArtifactError(f"Cannot read document lengths in {self.directory}: {error}") from error
+
+    def pagerank_scores(self):
+        if self.file is None or self.compact is None:
+            return None
+        path = self.compact / "pagerank.bin"
+        if not path.exists():
+            return None
+        try:
+            with path.open("rb") as file:
+                scores = array("d")
+                if path.stat().st_size != len(self.doc_urls) * PAGERANK_SCORE.size:
+                    raise ValueError("score file size does not match the document count")
+                scores.fromfile(file, len(self.doc_urls))
+            if byteorder != "little":
+                scores.byteswap()
+            if any(not isfinite(score) or score < 0 for score in scores):
+                raise ValueError("invalid PageRank score")
+            return scores
+        except (OSError, EOFError, ValueError) as error:
+            raise IndexArtifactError(f"Cannot read PageRank in {self.directory}: {error}") from error
 
     def document_url(self, doc_id):
         try:

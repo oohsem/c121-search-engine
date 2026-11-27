@@ -9,6 +9,7 @@ BUCKETS = 256
 # Base squared, base times emphasis, and emphasis squared for each document.
 NORM_COMPONENTS = struct.Struct("<ddd")
 DOCUMENT_LENGTH = struct.Struct("<Q")
+PAGERANK_SCORE = struct.Struct("<d")
 VERSION = 2
 SUPPORTED_VERSIONS = (1, VERSION)
 

@@ -8,6 +8,7 @@ from bs4.element import Comment, Declaration, Doctype, ProcessingInstruction
 IMPORTANT_TAGS = {"title", "h1", "h2", "h3", "b", "strong"}
 
 IGNORED_TAGS = {"script", "style", "noscript", "template"}
+LINK_TAGS = ("a", "area", "base")
 
 
 LARGE_HTML_CHARS = 8 * 1024 * 1024
@@ -18,8 +19,9 @@ VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
 class LargePageText(HTMLParser):
     """Collect searchable text without holding a tree for a large page."""
 
-    def __init__(self):
+    def __init__(self, on_link=None):
         super().__init__(convert_charrefs=True)
+        self.on_link = on_link
         self.tags = []
         self.ignored_depth = 0
         self.important_depth = 0
@@ -27,6 +29,10 @@ class LargePageText(HTMLParser):
         self.important = []
 
     def handle_starttag(self, tag, attrs):
+        if self.on_link is not None and not self.ignored_depth and tag in LINK_TAGS:
+            href = next((value for name, value in attrs if name == "href"), None)
+            if href is not None:
+                self.on_link(tag, href)
         if tag not in VOID_TAGS:
             self.tags.append(tag)
             self.ignored_depth += tag in IGNORED_TAGS
@@ -50,12 +56,12 @@ class LargePageText(HTMLParser):
                     self.important.append(text)
 
 
-def parse_html(content):
+def parse_html(content, *, on_link=None):
     # Plain text needs no HTML tree. Preserve its normal surrounding trim.
     if "<" not in content and "&" not in content:
         return content.strip(), ""
     if len(content) >= LARGE_HTML_CHARS:
-        parser = LargePageText()
+        parser = LargePageText(on_link)
         parser.feed(content)
         parser.close()
         return " ".join(parser.visible), " ".join(parser.important)
@@ -68,6 +74,10 @@ def parse_html(content):
     # remove irrelevant tags that may contain non-visible text or scripts
     for tag in soup(IGNORED_TAGS):
         tag.decompose()
+
+    if on_link is not None:
+        for tag in soup.find_all(LINK_TAGS, href=True):
+            on_link(tag.name, tag["href"])
 
     all_text_parts = []
     important_text_parts = []
