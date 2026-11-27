@@ -1,6 +1,11 @@
 """Log-weighted vector-space ranking for the Developer corpus."""
+from array import array
+from collections import Counter
 from functools import lru_cache
-from math import log10
+from math import isfinite, log10, sqrt
+
+from search_index import IndexArtifactError
+from tokenizer import process_text
 
 
 @lru_cache(maxsize=8192)
@@ -28,3 +33,57 @@ def document_weights(frequency, important_frequency):
 def document_weight(frequency, important_frequency, important_boost):
     base, emphasis = document_weights(frequency, important_frequency)
     return base + important_boost * emphasis
+
+
+
+class Ranker:
+    """Rank matches with the course's lnc.ltc weighting."""
+
+    def __init__(self, index, *, important_boost=0.75):
+        if not isfinite(important_boost) or important_boost < 0:
+            raise ValueError("Important-text boost must be finite and nonnegative.")
+        self.index = index
+        self.important_boost = important_boost
+        self.norms = array("d")
+        cross_weight = 2 * important_boost
+        squared_weight = important_boost * important_boost
+        for base_squared, cross, emphasis_squared in index.norm_components():
+            squared_norm = base_squared + cross_weight * cross + squared_weight * emphasis_squared
+            if not isfinite(squared_norm) or squared_norm < 0:
+                raise IndexArtifactError("Invalid document norm or important-text boost.")
+            self.norms.append(sqrt(squared_norm))
+
+    def _plan_query(self, query):
+        collection_size = len(self.norms)
+        plan = []
+        for term, frequency in Counter(process_text(query)).items():
+            location = self.index.posting_range(term)
+            if location is None:
+                continue
+            weight = tf_idf(frequency, collection_size, location[1])
+            # An IDF-zero term can still make a document a candidate.
+            plan.append((term, location, weight))
+        plan.sort(key=lambda item: (item[1][1], item[0]))
+        return plan
+
+    def scores(self, query):
+        plan = self._plan_query(query)
+        if not plan:
+            return {}
+        query_norm = sqrt(sum(weight * weight for _, _, weight in plan))
+        scores = {}
+        for term, location, weight in plan:
+            normalized_weight = weight / query_norm if query_norm else 0.0
+            for doc, frequency, important in self.index.iter_postings(term, location):
+                if doc >= len(self.norms) or not self.norms[doc]:
+                    raise IndexArtifactError(f"Missing document norm for posting {doc}.")
+                coordinate = document_weight(frequency, important, self.important_boost)
+                scores[doc] = scores.get(doc, 0.0) + normalized_weight * coordinate
+        return {doc: dot / self.norms[doc] for doc, dot in scores.items()}
+
+    def ranked_documents(self, query, top_k=5):
+        scores = self.scores(query)
+        return sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+
+    def search(self, query, top_k=5):
+        return [self.index.document_url(str(doc)) for doc, _ in self.ranked_documents(query, top_k)]
