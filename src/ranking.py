@@ -9,6 +9,23 @@ from search_index import IndexArtifactError
 from tokenizer import process_text
 
 
+STOPWORDS = frozenset(process_text(
+    "a an and are as at be by for from in is it of on or that the to was were with"
+))
+
+
+def query_terms(query, filter_stopwords):
+    terms = process_text(query)
+    if not filter_stopwords or '"' in query:
+        return Counter(terms)
+    informative = [term for term in terms if term not in STOPWORDS]
+    # Keep the whole query if removing stopwords would gut a short phrase
+    # or leave no usable terms. All terms remain present in the index.
+    if len(informative) >= 2 and 3 * (len(terms) - len(informative)) <= len(terms):
+        return Counter(informative)
+    return Counter(terms)
+
+
 @lru_cache(maxsize=8192)
 def log_tf(frequency):
     """A single occurrence weighs one, and an absent term weighs zero."""
@@ -40,11 +57,12 @@ def document_weight(frequency, important_frequency, important_boost):
 class Ranker:
     """Rank matches with the course's lnc.ltc weighting."""
 
-    def __init__(self, index, *, important_boost=0.75):
+    def __init__(self, index, *, important_boost=0.75, filter_stopwords=True):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
         self.index = index
         self.important_boost = important_boost
+        self.filter_stopwords = filter_stopwords
         self.norms = array("d")
         cross_weight = 2 * important_boost
         squared_weight = important_boost * important_boost
@@ -57,7 +75,7 @@ class Ranker:
     def _plan_query(self, query):
         collection_size = len(self.norms)
         plan = []
-        for term, frequency in Counter(process_text(query)).items():
+        for term, frequency in query_terms(query, self.filter_stopwords).items():
             location = self.index.posting_range(term)
             if location is None:
                 continue

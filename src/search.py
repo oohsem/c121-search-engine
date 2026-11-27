@@ -53,11 +53,13 @@ def main(argv=None, *, boolean=False):
     parser.add_argument("--index-dir", type=Path, default=DEFAULT_INDEX_DIR)
     parser.add_argument("--boolean", action="store_true", default=boolean,
                         help="Run the Milestone 2 Boolean search.")
+    parser.add_argument("--keep-stopwords", action="store_true",
+                        help="Keep every word from the ranked query.")
     args = parser.parse_args(argv)
 
     try:
         with IndexReader(args.index_dir) as index:
-            ranker = None if args.boolean else Ranker(index)
+            ranker = None if args.boolean else Ranker(index, filter_stopwords=not args.keep_stopwords)
             while True:
                 try:
                     raw_query = input("Give Query: ")
