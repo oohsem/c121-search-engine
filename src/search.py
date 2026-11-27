@@ -1,5 +1,6 @@
 import argparse
-from heapq import nsmallest
+import math
+from heapq import nlargest
 from pathlib import Path
 
 from search_index import DEFAULT_INDEX_DIR, IndexArtifactError, IndexReader
@@ -16,24 +17,83 @@ def search(query, top_k=5, *, index=None):
     return search_terms(terms, top_k, index)
 
 
+def calculate_tfidf(tf, df, total_docs):
+
+    # Terms that occur more frequently receive higher scores.
+    tf_weight = 1 + math.log(tf)
+
+    # Terms that appear in fewer documents are more informative.
+    idf_weight = math.log(
+        (total_docs + 1) / (df + 1)
+    ) + 1
+
+    return tf_weight * idf_weight
+
+
 def search_terms(terms, top_k, index):
+
+    if not terms or top_k <= 0:
+        return []
+
     all_postings = []
+
+    # Retrieve postings for each query term.
     for term in terms:
+
         postings = index.get_postings(term)
+
         if not postings:
             return []
+
         all_postings.append(postings)
 
+    # Start with the smallest posting list.
     all_postings.sort(key=len)
+
     matches = set(all_postings[0])
+
+    # Find documents containing every query term.
     for postings in all_postings[1:]:
+
         matches.intersection_update(postings)
+
         if not matches:
             return []
 
-    # The Boolean baseline has no relevance score. Use numeric document IDs
-    # as a reproducible order before taking the requested number of results.
-    return [index.document_url(doc_id) for doc_id in nsmallest(top_k, matches, key=int)]
+    total_docs = len(index.doc_urls)
+
+    scores = {}
+
+    # Calculate the relevance score of each matching document.
+    for doc_id in matches:
+
+        score = 0.0
+
+        for postings in all_postings:
+
+            tf = postings[doc_id]["tf"]
+            df = len(postings)
+
+            score += calculate_tfidf(
+                tf, df, total_docs
+            )
+
+        scores[doc_id] = score
+
+    # Retrieve the documents with the highest relevance scores.
+    ranked_docs = nlargest(
+        top_k,
+        matches,
+        key=lambda doc_id: (
+            scores[doc_id],
+            -int(doc_id)
+        )
+    )
+
+    return [
+        index.document_url(doc_id)
+        for doc_id in ranked_docs
+    ]
 
 
 def main(argv=None):
