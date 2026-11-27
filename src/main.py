@@ -1,7 +1,8 @@
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
-from urllib.parse import urldefrag
+from urllib.parse import urldefrag, urlsplit
 from parser import parse_html
 from optimize import optimize
 from indexer import DOCS_PER_PARTIAL, build_index, save_partial_index, merge_partial_indexes
@@ -28,53 +29,44 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+SKIP_REASONS = ("unreadable_file", "malformed_json", "unusable_url", "empty_content")
+
+
 def read_document(file_path, dataset_dir):
-
     try:
-
-        with open(
-            file_path,
-            "r",
-            encoding="utf-8",
-            errors="replace"
-        ) as file:
-
+        with file_path.open(encoding="utf-8") as file:
             data = json.load(file)
+    except OSError:
+        return None, "unreadable_file"
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, "malformed_json"
 
-        # Make sure the JSON contains a dictionary.
-        if not isinstance(data, dict):
-            return None
+    if not isinstance(data, dict):
+        return None, "malformed_json"
 
-        url = data.get("url", "")
-        content = data.get("content", "")
+    raw_url = data.get("url")
+    if not isinstance(raw_url, str):
+        return None, "unusable_url"
+    try:
+        url = urldefrag(raw_url.strip()).url
+        parsed_url = urlsplit(url)
+        if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname:
+            return None, "unusable_url"
+    except ValueError:
+        return None, "unusable_url"
 
-        # Make sure URL and content are strings.
-        if not isinstance(url, str):
-            url = ""
+    content = data.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None, "empty_content"
 
-        if not isinstance(content, str):
-            content = ""
-
-        # Remove URL fragments.
-        url = urldefrag(url).url
-
-        # Use the relative file path as the document ID.
-        doc_id = file_path.relative_to(dataset_dir).as_posix()
-
-        return {
-            "doc_id": doc_id,
-            "url": url,
-            "content": content
-        }
-
-    except (json.JSONDecodeError, OSError) as error:
-
-        print("Error reading:", file_path, error)
-
-        return None
+    return {
+        "doc_id": file_path.relative_to(dataset_dir).as_posix(),
+        "url": url,
+        "content": content,
+    }, None
 
 
-def generate_report(document_count, unique_token_count, partial_count, skipped_count,
+def generate_report(document_count, unique_token_count, partial_count, skipped_by_reason,
                     index_size_kb, dataset_dir, max_docs, index_paths):
 
     # Create the report contents.
@@ -114,9 +106,11 @@ def generate_report(document_count, unique_token_count, partial_count, skipped_c
         "Number of partial indexes created: " + str(partial_count)
     )
 
-    report.append(
-        "Number of documents skipped: " + str(skipped_count)
-    )
+    skipped_count = sum(skipped_by_reason.values())
+    report.append(f"Number of JSON records examined: {document_count + skipped_count}")
+    report.append(f"Number of documents skipped: {skipped_count}")
+    for reason in SKIP_REASONS:
+        report.append(f"  {reason}: {skipped_by_reason[reason]}")
 
     report.append("")
 
@@ -161,7 +155,7 @@ def main(argv=None):
     inverted_index = {}
 
     document_count = 0
-    skipped_count = 0
+    skipped_by_reason = Counter()
     partial_count = 0
 
     # Store document IDs and URLs separately.
@@ -178,23 +172,17 @@ def main(argv=None):
                 if document_count >= max_docs:
                     break
 
-            document = read_document(file_path, dataset_dir)
-
-            # Skip documents that could not be read.
-            if document is None:
-
-                skipped_count += 1
-
+            document, reason = read_document(file_path, dataset_dir)
+            if reason is not None:
+                skipped_by_reason[reason] += 1
                 continue
 
             doc_id = document["doc_id"]
-
             url = document["url"]
-
-            html = document["content"]
-
-            # Extract regular and important text.
-            all_text, important_text = parse_html(html)
+            all_text, important_text = parse_html(document["content"])
+            if not all_text.strip():
+                skipped_by_reason["empty_content"] += 1
+                continue
 
             # Add document terms to the inverted index.
             build_index(all_text, important_text, document_count, inverted_index)
@@ -233,7 +221,11 @@ def main(argv=None):
 
     print("Documents indexed:", document_count)
 
+    skipped_count = sum(skipped_by_reason.values())
+    print("JSON records examined:", document_count + skipped_count)
     print("Documents skipped:", skipped_count)
+    for reason in SKIP_REASONS:
+        print(f"  {reason}: {skipped_by_reason[reason]}")
 
     print("Partial indexes created:", partial_count)
 
@@ -269,7 +261,7 @@ def main(argv=None):
     print("=====================================")
 
     # Generate the Milestone 1 report.
-    generate_report(document_count, unique_token_count, partial_count, skipped_count,
+    generate_report(document_count, unique_token_count, partial_count, skipped_by_reason,
                     index_size_kb, dataset_dir, max_docs, (index_path, documents_path, lexicon_path))
 
     print("\nFinal index saved at:", index_path)
