@@ -1,4 +1,5 @@
 import warnings
+from html.parser import HTMLParser
 
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning, XMLParsedAsHTMLWarning
 from bs4.element import Comment, Declaration, Doctype, ProcessingInstruction
@@ -9,10 +10,55 @@ IMPORTANT_TAGS = {"title", "h1", "h2", "h3", "b", "strong"}
 IGNORED_TAGS = {"script", "style", "noscript", "template"}
 
 
+LARGE_HTML_CHARS = 8 * 1024 * 1024
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+             "meta", "param", "source", "track", "wbr"}
+
+
+class LargePageText(HTMLParser):
+    """Collect searchable text without holding a tree for a large page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tags = []
+        self.ignored_depth = 0
+        self.important_depth = 0
+        self.visible = []
+        self.important = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in VOID_TAGS:
+            self.tags.append(tag)
+            self.ignored_depth += tag in IGNORED_TAGS
+            self.important_depth += tag in IMPORTANT_TAGS
+
+    def handle_endtag(self, tag):
+        for position in range(len(self.tags) - 1, -1, -1):
+            if self.tags[position] == tag:
+                for removed in self.tags[position:]:
+                    self.ignored_depth -= removed in IGNORED_TAGS
+                    self.important_depth -= removed in IMPORTANT_TAGS
+                del self.tags[position:]
+                break
+
+    def handle_data(self, data):
+        if not self.ignored_depth:
+            text = data.strip()
+            if text:
+                self.visible.append(text)
+                if self.important_depth:
+                    self.important.append(text)
+
+
 def parse_html(content):
     # Plain text needs no HTML tree. Preserve its normal surrounding trim.
     if "<" not in content and "&" not in content:
         return content.strip(), ""
+    if len(content) >= LARGE_HTML_CHARS:
+        parser = LargePageText()
+        parser.feed(content)
+        parser.close()
+        return " ".join(parser.visible), " ".join(parser.important)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
