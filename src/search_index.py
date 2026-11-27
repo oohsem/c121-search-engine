@@ -17,8 +17,9 @@ class IndexArtifactError(RuntimeError):
 
 
 class IndexReader:
-    def __init__(self, root=DEFAULT_INDEX_DIR):
+    def __init__(self, root=DEFAULT_INDEX_DIR, *, include_sources=False):
         self.root = Path(root)
+        self.include_sources = include_sources
         self.file = None
         self._file_lock = Lock()
 
@@ -28,6 +29,7 @@ class IndexReader:
         try:
             directory = resolve_index_dir(self.root)
             doc_urls = {}
+            doc_sources = {}
             with (directory / "documents.jsonl").open(encoding="utf-8") as documents:
                 for line in documents:
                     if not line.strip():
@@ -39,6 +41,8 @@ class IndexReader:
                     if str(doc_id) in doc_urls:
                         raise ValueError(f"duplicate document ID {doc_id}")
                     doc_urls[str(doc_id)] = url
+                    if self.include_sources and isinstance(record.get("doc_id"), str):
+                        doc_sources[doc_id] = record["doc_id"]
             compact = directory / "optimized"
             if compact.is_dir():
                 manifest = json.loads((compact / "manifest.json").read_text(encoding="utf-8"))
@@ -75,6 +79,7 @@ class IndexReader:
         self.postings_size = postings_size
         self._bucket = lru_cache(maxsize=32)(self._read_bucket)
         self.doc_urls = doc_urls
+        self.doc_sources = doc_sources
         self.file = file
         return self
 
