@@ -3,7 +3,7 @@ from heapq import nsmallest
 from pathlib import Path
 from time import perf_counter
 
-from ranking import Ranker
+from ranking import DEFAULT_IMPORTANT_BOOST, DEFAULT_SHORT_PAGE_FLOOR, Ranker
 from search_index import DEFAULT_INDEX_DIR, IndexArtifactError, IndexReader
 from tokenizer import process_text
 
@@ -58,11 +58,18 @@ def main(argv=None, *, boolean=False):
                         help="Run the Milestone 2 Boolean search.")
     parser.add_argument("--keep-stopwords", action="store_true",
                         help="Keep every word from the ranked query.")
+    parser.add_argument("--important-boost", type=float, default=DEFAULT_IMPORTANT_BOOST,
+                        help="Weight given to words in titles, headings, and bold text.")
+    parser.add_argument("--short-page-floor", type=int, default=DEFAULT_SHORT_PAGE_FLOOR,
+                        help="Token threshold for the short-page penalty; 0 disables it.")
     args = parser.parse_args(argv)
 
     try:
         with IndexReader(args.index_dir) as index:
-            ranker = None if args.boolean else Ranker(index, filter_stopwords=not args.keep_stopwords)
+            ranker = None if args.boolean else Ranker(
+                index, important_boost=args.important_boost,
+                filter_stopwords=not args.keep_stopwords, short_page_floor=args.short_page_floor,
+            )
             while True:
                 try:
                     raw_query = input("Give Query: ")

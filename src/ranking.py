@@ -9,6 +9,10 @@ from search_index import IndexArtifactError
 from tokenizer import process_text
 
 
+DEFAULT_IMPORTANT_BOOST = 0.35
+DEFAULT_SHORT_PAGE_FLOOR = 85
+
+
 STOPWORDS = frozenset(process_text(
     "a an and are as at be by for from in is it of on or that the to was were with"
 ))
@@ -57,10 +61,12 @@ def document_weight(frequency, important_frequency, important_boost):
 class Ranker:
     """Rank matches with the course's lnc.ltc weighting."""
 
-    def __init__(self, index, *, important_boost=0.75, filter_stopwords=True,
-                 prefer_coverage=True, short_page_floor=0):
+    def __init__(self, index, *, important_boost=DEFAULT_IMPORTANT_BOOST, filter_stopwords=True,
+                 prefer_coverage=True, short_page_floor=DEFAULT_SHORT_PAGE_FLOOR):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
+        if type(short_page_floor) is not int or short_page_floor < 0:
+            raise ValueError("The short-page threshold must be a nonnegative integer.")
         self.index = index
         self.important_boost = important_boost
         self.filter_stopwords = filter_stopwords
