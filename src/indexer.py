@@ -12,7 +12,7 @@ from tokenizer import process_text
 
 # Spill when either bound is reached.
 DOCS_PER_PARTIAL = 5000
-POSTINGS_PER_PARTIAL = 500_000
+POSTINGS_PER_PARTIAL = 250_000
 
 
 def build_index(all_text, important_text, doc_num, index):
@@ -72,11 +72,14 @@ def save_partial_index(index, partial_dir, partial_number):
 MAX_MERGE_INPUTS = 16
 
 
-def merge_runs(partial_files, output_path, lexicon=None):
+def merge_runs(partial_files, output_path, lexicon_file=None):
     with ExitStack() as stack:
         inputs = [stack.enter_context(path.open(encoding="utf-8")) for path in partial_files]
         output = stack.enter_context(output_path.open("wb"))
         heap = []
+        term_count = 0
+        if lexicon_file is not None:
+            lexicon_file.write("{")
 
         def read_next(file_number):
             line = inputs[file_number].readline()
@@ -95,16 +98,21 @@ def merge_runs(partial_files, output_path, lexicon=None):
                 merged_postings.update(postings)
                 read_next(file_number)
 
-            if lexicon is not None:
-                lexicon[term] = output.tell()
+            if lexicon_file is not None:
+                prefix = "," if term_count else ""
+                key = json.dumps(term, ensure_ascii=False)
+                lexicon_file.write(f"{prefix}{key}:{output.tell()}")
             record = {"term": term, "postings": merged_postings}
             output.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
+            term_count += 1
+        if lexicon_file is not None:
+            lexicon_file.write("}")
+        return term_count
 
 
 def merge_partial_indexes(partial_files, final_path, lexicon_path):
     partial_files = [Path(path) for path in partial_files]
     final_path = Path(final_path)
-    lexicon = {}
 
     # Limit the fan-in even when a large corpus creates many runs.
     with TemporaryDirectory(prefix="merge-", dir=final_path.parent) as directory:
@@ -126,8 +134,6 @@ def merge_partial_indexes(partial_files, final_path, lexicon_path):
             partial_files = next_runs
             pass_number += 1
 
-        merge_runs(partial_files, final_path, lexicon)
-
-    with Path(lexicon_path).open("w", encoding="utf-8") as lex_file:
-        json.dump(lexicon, lex_file, ensure_ascii=False)
-    return len(lexicon)
+        # Stream the legacy term/offset mapping as the final postings are written.
+        with Path(lexicon_path).open("w", encoding="utf-8") as lexicon_file:
+            return merge_runs(partial_files, final_path, lexicon_file)
