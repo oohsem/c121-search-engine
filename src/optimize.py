@@ -9,19 +9,12 @@ from pathlib import Path
 import shutil
 import struct
 import tempfile
-import zlib
 
+from compact_format import BUCKETS, POSTING, VERSION, bucket_for
 from index_storage import resolve_index_dir
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
-POSTING = struct.Struct('<III')  # document ID, raw TF, important TF
-BUCKETS = 256
 BUCKET_BUFFER_BYTES = 16 * 1024
-VERSION = 1
-
-
-def bucket_for(term):
-    return zlib.crc32(term.encode('utf-8')) % BUCKETS
 
 
 def flush_bucket(path, buffer):
