@@ -99,6 +99,8 @@ def main(argv=None, *, boolean=False):
                         help="Weight of offline link authority; 0 uses text relevance alone.")
     parser.add_argument("--proximity-weight", type=float, default=DEFAULT_PROXIMITY_WEIGHT,
                         help="Proximity boost for unquoted ranked queries; 0 disables it.")
+    parser.add_argument("--show-duplicates", action="store_true",
+                        help="Show separate URLs with matching content in ranked search.")
     parser.add_argument("--short-page-floor", type=int, default=DEFAULT_SHORT_PAGE_FLOOR,
                         help="Token threshold for the short-page penalty; 0 disables it.")
     parser.add_argument("--snippets", action="store_true",
@@ -116,6 +118,7 @@ def main(argv=None, *, boolean=False):
                 index, important_boost=args.important_boost,
                 filter_stopwords=not args.keep_stopwords, short_page_floor=args.short_page_floor,
                 pagerank_weight=args.pagerank_weight, proximity_weight=args.proximity_weight,
+                collapse_duplicates=not args.show_duplicates,
             )
             while True:
                 try:

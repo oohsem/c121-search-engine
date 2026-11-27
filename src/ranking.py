@@ -75,7 +75,7 @@ class Ranker:
     def __init__(self, index, *, important_boost=DEFAULT_IMPORTANT_BOOST, filter_stopwords=True,
                  prefer_coverage=True, short_page_floor=DEFAULT_SHORT_PAGE_FLOOR,
                  pagerank_weight=DEFAULT_PAGERANK_WEIGHT,
-                 proximity_weight=DEFAULT_PROXIMITY_WEIGHT):
+                 proximity_weight=DEFAULT_PROXIMITY_WEIGHT, collapse_duplicates=True):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
         if type(short_page_floor) is not int or short_page_floor < 0:
@@ -85,6 +85,7 @@ class Ranker:
         if not isfinite(proximity_weight) or not 0.0 <= proximity_weight <= 1.0:
             raise ValueError("Proximity weight must be between zero and one.")
         self.index = index
+        self.duplicate_groups = getattr(index, "duplicate_groups", None) if collapse_duplicates else None
         self.proximity_weight = proximity_weight
         authority = index.pagerank_scores() if pagerank_weight else None
         self.authority_bonus = (
@@ -162,7 +163,7 @@ class Ranker:
             doc, score = item
             return -matches.get(doc, 0), -score, doc
 
-        baseline = nsmallest(top_k, self._best_by_url(scores.items(), order).values(), key=order)
+        baseline = self._top_unique(scores.items(), order, top_k)
         positions = self.index.positions
         term_count = sum(terms.values())
         if positions is None or not self.proximity_weight or term_count < 2:
@@ -171,7 +172,7 @@ class Ranker:
         if None in locations.values():
             return baseline
 
-        # Include the unique baseline hits even if duplicate URLs fill the shortlist.
+        # Include the unique baseline hits even if duplicates fill the shortlist.
         candidates = dict(nsmallest(max(top_k, PROXIMITY_SHORTLIST), scores.items(), key=order))
         candidates.update(baseline)
         rescored = []
@@ -182,7 +183,30 @@ class Ranker:
                 if span is not None:
                     score += self.proximity_weight * term_count / span
             rescored.append((doc, score))
-        return nsmallest(top_k, self._best_by_url(rescored, order).values(), key=order)
+        return self._top_unique(rescored, order, top_k)
+
+    def _result_keys(self, doc):
+        url = self.index.document_url(str(doc))
+        group = self.duplicate_groups[doc] if self.duplicate_groups is not None else doc
+        return url, group
+
+    def _top_unique(self, items, order, top_k, seen_urls=None, seen_groups=None):
+        if self.duplicate_groups is None:
+            return nsmallest(top_k, self._best_by_url(items, order).values(), key=order)
+
+        seen_urls = set() if seen_urls is None else seen_urls
+        seen_groups = set() if seen_groups is None else seen_groups
+        candidates = [(order(item), item) for item in items]
+        heapify(candidates)
+        results = []
+        while candidates and len(results) < top_k:
+            _, item = heappop(candidates)
+            url, group = self._result_keys(item[0])
+            if url and url not in seen_urls and group not in seen_groups:
+                seen_urls.add(url)
+                seen_groups.add(group)
+                results.append(item)
+        return results
 
     def _best_by_url(self, items, order):
         best = {}
@@ -247,23 +271,25 @@ class Ranker:
                 doc, score = item
                 return -matches.get(doc, 0), -score, doc
 
-            return nsmallest(top_k, self._best_by_url(scores.items(), order).values(), key=order)
+            return self._top_unique(scores.items(), order, top_k)
 
         scores, matches = self._score_query(terms, eligible)
         candidates = [(-matches.get(doc, 0), -score, doc) for doc, score in scores.items()]
         heapify(candidates)
         seen_urls = set()
+        seen_groups = set()
         results = []
 
         for _ in range(PHRASE_RANDOM_LOOKUPS):
             if not candidates or len(results) == top_k:
                 return results
             _, negative_score, doc = heappop(candidates)
-            url = self.index.document_url(str(doc))
-            if not url or url in seen_urls:
+            url, group = self._result_keys(doc)
+            if not url or url in seen_urls or group in seen_groups:
                 continue
             if phrase_match(positions.rows(doc, locations, required)):
                 seen_urls.add(url)
+                seen_groups.add(group)
                 results.append((doc, -negative_score))
 
         if len(results) == top_k:
@@ -275,15 +301,27 @@ class Ranker:
         remaining = {}
         for item in sorted(candidates, key=itemgetter(2)):
             doc = item[2]
-            url = self.index.document_url(str(doc))
-            if not url or url in seen_urls:
+            url, group = self._result_keys(doc)
+            if not url or url in seen_urls or group in seen_groups:
                 continue
-            previous = remaining.get(url)
+            key = (url, group) if self.duplicate_groups is not None else url
+            previous = remaining.get(key)
             if (previous is None or item < previous) and phrase_match(
                 positions.rows(doc, locations, required, cursors)
             ):
-                remaining[url] = item
-        results.extend((doc, -score) for _, score, doc in nsmallest(top_k - len(results), remaining.values()))
+                remaining[key] = item
+        if self.duplicate_groups is None:
+            results.extend((doc, -score) for _, score, doc in nsmallest(top_k - len(results), remaining.values()))
+            return results
+
+        def order(item):
+            doc, score = item
+            return -matches.get(doc, 0), -score, doc
+
+        results.extend(self._top_unique(
+            ((doc, -score) for _, score, doc in remaining.values()),
+            order, top_k - len(results), seen_urls, seen_groups,
+        ))
         return results
 
     def ranked_documents(self, query, top_k=5):

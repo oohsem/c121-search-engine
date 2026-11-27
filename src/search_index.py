@@ -18,6 +18,7 @@ from compact_format import (
     source_signature,
 )
 
+from duplicates import DUPLICATE_GROUPS, read_groups
 from index_storage import resolve_index_dir
 from positions import PositionIndex
 
@@ -86,6 +87,7 @@ class IndexReader:
                     type(offset) is not int or offset < 0 for offset in lexicon.values()
                 ):
                     raise ValueError("lexicon must map terms to nonnegative byte offsets")
+            duplicate_groups = read_groups(directory / DUPLICATE_GROUPS, len(doc_urls))
             file = postings_path.open("rb")
             try:
                 positions = PositionIndex.open(directory, file, postings_count) if compact is not None else None
@@ -108,6 +110,7 @@ class IndexReader:
         self.doc_sources = doc_sources
         self.file = file
         self.positions = positions
+        self.duplicate_groups = duplicate_groups
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):

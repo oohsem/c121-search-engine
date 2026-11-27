@@ -4,10 +4,11 @@ import json
 import shutil
 from collections import Counter
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, TemporaryFile
 from urllib.parse import urldefrag, urlsplit
 from uuid import uuid4
 
+from duplicates import DUPLICATE_GROUPS, DuplicateDetector
 from index_storage import publish_generation
 from parser import parse_html
 from positions import POSITION_DATA, POSITION_OFFSETS, position_writer
@@ -206,12 +207,13 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
     postings_in_partial = 0
 
     # Store document IDs and URLs separately.
-    with open(
-        documents_path,
-        "w",
-        encoding="utf-8"
-    ) as doc_file, links_path.open("w", encoding="utf-8", newline="\n") as link_file:
-
+    with (
+        documents_path.open("w", encoding="utf-8") as doc_file,
+        links_path.open("w", encoding="utf-8", newline="\n") as link_file,
+        TemporaryFile(dir=partial_dir) as representative_texts,
+    ):
+        # Keep reusable visible text on disk for candidate verification.
+        duplicates = DuplicateDetector(representative_texts)
         for file_path in dataset_dir.rglob("*.json"):
 
             # Stop if the maximum document limit is reached.
@@ -244,6 +246,8 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
             if not all_text or all_text.isspace():
                 skipped_by_reason["empty_content"] += 1
                 continue
+
+            duplicates.add(all_text)
 
             # Add document terms to the inverted index.
             postings_in_partial += build_index(
@@ -296,6 +300,11 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
     if not document_count:
         raise ValueError(f"No indexable documents found in {dataset_dir}")
 
+    duplicates_path = final_dir / DUPLICATE_GROUPS
+    duplicates.write(duplicates_path)
+    print(f"Grouped {duplicates.exact_count:,} exact and {duplicates.near_count:,} near copies.")
+    del duplicates
+
     # Find all partial indexes from this build.
     partial_files = sorted(partial_dir.glob("partial_*.jsonl"))
 
@@ -310,7 +319,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
     # Calculate the total size of the final index files.
     index_paths = (index_path, documents_path, lexicon_path,
-                   final_dir / POSITION_OFFSETS, final_dir / POSITION_DATA)
+                   final_dir / POSITION_OFFSETS, final_dir / POSITION_DATA, duplicates_path)
     index_size_bytes = sum(path.stat().st_size for path in index_paths)
 
     index_size_kb = index_size_bytes / 1024
