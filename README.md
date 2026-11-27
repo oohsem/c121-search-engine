@@ -1,5 +1,6 @@
-# c121-search-engine
+# CS121 Search Engine
 
-we are going for some extra credit options.
-Here they are:
-*none right now*
+Developer-track search engine for CS121 Project 3.
+
+See [README.txt](README.txt) for setup, build, search, and submission instructions
+and [TEST.txt](TEST.txt) for the Milestone 3 evaluation queries.

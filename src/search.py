@@ -98,7 +98,7 @@ def main(argv=None, *, boolean=False):
     parser.add_argument("--anchor-weight", type=float, default=DEFAULT_ANCHOR_WEIGHT,
                         help="Weight of incoming anchor text; 0 disables it.")
     parser.add_argument("--pagerank-weight", type=float, default=DEFAULT_PAGERANK_WEIGHT,
-                        help="Weight of offline link authority; 0 uses text relevance alone.")
+                        help="Weight of offline link authority; 0 disables PageRank.")
     parser.add_argument("--proximity-weight", type=float, default=DEFAULT_PROXIMITY_WEIGHT,
                         help="Proximity boost for unquoted ranked queries; 0 disables it.")
     parser.add_argument("--show-duplicates", action="store_true",
