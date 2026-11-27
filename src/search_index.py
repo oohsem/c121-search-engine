@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 
-from compact_format import POSTING, VERSION, bucket_for
+from compact_format import NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for
 
 from index_storage import resolve_index_dir
 
@@ -42,8 +42,9 @@ class IndexReader:
             compact = directory / "optimized"
             if compact.is_dir():
                 manifest = json.loads((compact / "manifest.json").read_text(encoding="utf-8"))
+                compact_version = manifest["version"]
                 postings_count = manifest["postings"]
-                if (manifest["version"] != VERSION or manifest["documents"] != len(doc_urls)
+                if (compact_version not in SUPPORTED_VERSIONS or manifest["documents"] != len(doc_urls)
                         or type(postings_count) is not int or postings_count < 0):
                     raise ValueError("incompatible compact index manifest")
                 postings_path = compact / "postings.bin"
@@ -53,6 +54,7 @@ class IndexReader:
                 lexicon = None
             else:
                 compact = None
+                compact_version = 0
                 postings_size = 0
                 postings_path = directory / "index.jsonl"
                 lexicon = json.loads((directory / "lexicon.json").read_text(encoding="utf-8"))
@@ -69,6 +71,7 @@ class IndexReader:
         self.directory = directory
         self.lexicon = lexicon
         self.compact = compact
+        self.compact_version = compact_version
         self.postings_size = postings_size
         self._bucket = lru_cache(maxsize=32)(self._read_bucket)
         self.doc_urls = doc_urls
@@ -144,6 +147,19 @@ class IndexReader:
             return POSTING.iter_unpack(data)
         except (OSError, ValueError) as error:
             raise IndexArtifactError(f"Cannot read postings for {term!r} in {self.directory}: {error}") from error
+
+    def norm_components(self):
+        if self.file is None:
+            raise RuntimeError("Open the index before loading document norms.")
+        if self.compact_version != VERSION:
+            raise IndexArtifactError("Ranked search needs document norms. Run python src/main.py to rebuild the index.")
+        try:
+            data = (self.compact / "norms.bin").read_bytes()
+            if len(data) != len(self.doc_urls) * NORM_COMPONENTS.size:
+                raise ValueError("norm file size does not match the document count")
+            return NORM_COMPONENTS.iter_unpack(data)
+        except (OSError, ValueError) as error:
+            raise IndexArtifactError(f"Cannot read document norms in {self.directory}: {error}") from error
 
     def document_url(self, doc_id):
         try:

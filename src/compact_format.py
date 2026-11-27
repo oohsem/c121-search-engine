@@ -6,7 +6,10 @@ import zlib
 
 POSTING = struct.Struct("<III")  # document ID, term frequency, important frequency
 BUCKETS = 256
-VERSION = 1
+# Base squared, base times emphasis, and emphasis squared for each document.
+NORM_COMPONENTS = struct.Struct("<ddd")
+VERSION = 2
+SUPPORTED_VERSIONS = (1, VERSION)
 
 
 def bucket_for(term):

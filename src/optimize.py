@@ -11,8 +11,9 @@ import shutil
 import struct
 import tempfile
 
-from compact_format import BUCKETS, POSTING, VERSION, bucket_for, lexicon_row
+from compact_format import BUCKETS, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for, lexicon_row
 from index_storage import resolve_index_dir
+from ranking import document_weights
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 BUCKET_BUFFER_BYTES = 16 * 1024
@@ -47,7 +48,7 @@ def optimize(index_dir):
             existing = None
         if (isinstance(existing, dict) and existing.get("version") == VERSION
                 and all(existing.get(key) == value for key, value in signature.items())
-                and all((target / name).is_file() for name in ("postings.bin", "lengths.bin"))
+                and all((target / name).is_file() for name in ("postings.bin", "lengths.bin", "norms.bin"))
                 and all((target / f"lex_{number:02x}.jsonl").is_file() for number in range(BUCKETS))):
             print(f"Compact index already available at {target}.")
             return existing
@@ -62,6 +63,9 @@ def optimize(index_dir):
     if not ids or ids != list(range(len(ids))):
         raise ValueError('Expected nonempty documents.jsonl with consecutive numeric IDs.')
     lengths = [0] * len(ids)
+    base_squared = [0.0] * len(ids)
+    cross = [0.0] * len(ids)
+    emphasis_squared = [0.0] * len(ids)
     temp = Path(tempfile.mkdtemp(prefix='optimized-build-', dir=index_dir))
     count = 0
     posting_count = 0
@@ -83,6 +87,10 @@ def optimize(index_dir):
                     tf, imp = stats["tf"], stats["important_tf"]
                     data.extend(POSTING.pack(doc, tf, imp))
                     lengths[doc] += tf
+                    base, emphasis = document_weights(tf, imp)
+                    base_squared[doc] += base * base
+                    cross[doc] += base * emphasis
+                    emphasis_squared[doc] += emphasis * emphasis
                 out.write(data)
 
                 number = bucket_for(term)
@@ -99,6 +107,9 @@ def optimize(index_dir):
         # Explicit little-endian values for portability across platforms.
         with (temp / 'lengths.bin').open('wb') as f:
             f.write(struct.pack(f'<{len(lengths)}Q', *lengths))
+        with (temp / "norms.bin").open("wb") as norms:
+            for components in zip(base_squared, cross, emphasis_squared):
+                norms.write(NORM_COMPONENTS.pack(*components))
         if source_signature(source, docs) != signature:
             raise RuntimeError("Index sources changed during optimization. Retry on a complete build.")
         manifest = {'version': VERSION, 'documents': len(ids), 'terms': count,
@@ -118,8 +129,12 @@ def verify(index_dir):
     source = index_dir / "index.jsonl"
     compact = index_dir / "optimized"
     manifest = json.loads((compact / "manifest.json").read_text(encoding="utf-8"))
-    if manifest["version"] != VERSION:
+    if manifest["version"] not in SUPPORTED_VERSIONS:
         raise ValueError("Cannot verify an unsupported compact index version.")
+    if manifest["version"] == VERSION and (
+        (compact / "norms.bin").stat().st_size != manifest["documents"] * NORM_COMPONENTS.size
+    ):
+        raise ValueError("Document norm file size does not match the manifest.")
 
     expected_buckets = [hashlib.sha256() for _ in range(BUCKETS)]
     terms = posting_count = 0
