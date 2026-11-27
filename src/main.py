@@ -1,8 +1,13 @@
 import argparse
 import json
+import shutil
 from collections import Counter
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urldefrag, urlsplit
+from uuid import uuid4
+
+from index_storage import publish_generation
 from parser import parse_html
 from optimize import optimize
 from indexer import (
@@ -57,11 +62,21 @@ def read_document(file_path, dataset_dir):
     raw_url = data.get("url")
     if not isinstance(raw_url, str):
         return None, "unusable_url"
+    raw_url = raw_url.strip()
+    address = raw_url.split("#", 1)[0]
+    # urllib strips some controls while parsing. Check what we will store first.
+    if any(ord(character) < 32 or ord(character) == 127 for character in address):
+        return None, "unusable_url"
     try:
-        url = urldefrag(raw_url.strip()).url
+        url = urldefrag(raw_url).url
         parsed_url = urlsplit(url)
-        if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname:
+        hostname = parsed_url.hostname
+        if parsed_url.scheme not in ("http", "https") or not hostname:
             return None, "unusable_url"
+        if any(character.isspace() for character in hostname) or parsed_url.port == 0:
+            return None, "unusable_url"
+        # Reject ill-formed URLs before writing this generation's document map.
+        url.encode("utf-8")
     except ValueError:
         return None, "unusable_url"
 
@@ -139,27 +154,35 @@ def main(argv=None):
     if not dataset_dir.is_dir():
         raise SystemExit(f"Dataset directory not found: {dataset_dir}")
 
-    max_docs = args.max_docs
     output_root = args.output_root.resolve()
-    if max_docs is not None:
+    if args.max_docs is not None:
         output_root /= "smoke_index"
-    final_dir = output_root / "final_index"
-    partial_dir = output_root / "partial_indexes"
+    final_root = output_root / "final_index"
+    partial_root = output_root / "partial_indexes"
+    final_dir = final_root / "generations" / f"index-{uuid4().hex}"
+    final_dir.mkdir(parents=True)
+    try:
+        partial_root.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix="build-", dir=partial_root) as directory:
+            build_generation(args, dataset_dir, final_dir, Path(directory))
+    except BaseException:
+        shutil.rmtree(final_dir, ignore_errors=True)
+        raise
+
+    # Readers keep their original generation even if another rebuild finishes.
+    publish_generation(final_root, final_dir)
+    print("\nFinal index saved at:", final_dir / "index.jsonl")
+
+
+def build_generation(args, dataset_dir, final_dir, partial_dir):
+    max_docs = args.max_docs
     index_path = final_dir / "index.jsonl"
     documents_path = final_dir / "documents.jsonl"
     lexicon_path = final_dir / "lexicon.json"
-    final_dir.mkdir(parents=True, exist_ok=True)
-    partial_dir.mkdir(parents=True, exist_ok=True)
 
     print("Build mode:", "smoke" if max_docs is not None else "full")
     print("Dataset:", dataset_dir)
     print("Document limit:", max_docs if max_docs is not None else "none")
-
-    # Remove old partial indexes from previous runs.
-    for old_file in partial_dir.glob("partial_*.jsonl"):
-        old_file.unlink()
-
-    print("Starting index construction...")
 
     # In-memory inverted index.
     inverted_index = {}
@@ -244,7 +267,10 @@ def main(argv=None):
 
         print("WARNING: Fewer than three partial indexes were created.")
 
-    # Find all generated partial indexes.
+    if not document_count:
+        raise ValueError(f"No indexable documents found in {dataset_dir}")
+
+    # Find all partial indexes from this build.
     partial_files = sorted(partial_dir.glob("partial_*.jsonl"))
 
     # Merge the partial indexes.
@@ -273,8 +299,6 @@ def main(argv=None):
     # Generate the Milestone 1 report.
     generate_report(document_count, unique_token_count, partial_count, skipped_by_reason,
                     index_size_kb, dataset_dir, max_docs, (index_path, documents_path, lexicon_path))
-
-    print("\nFinal index saved at:", index_path)
 
     # Build the compact disk-backed index required by Milestone 3.
     optimize(final_dir)

@@ -1,10 +1,11 @@
 from pathlib import Path
 import json
+from index_storage import resolve_index_dir
 from tokenizer import process_text
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
-FINAL_DIR = PROJECT_DIR / "final_index"
+FINAL_DIR = resolve_index_dir(PROJECT_DIR / "final_index")
 
 INDEX_PATH = FINAL_DIR / "index.jsonl"
 

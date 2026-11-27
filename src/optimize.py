@@ -11,6 +11,8 @@ import struct
 import tempfile
 import zlib
 
+from index_storage import resolve_index_dir
+
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 POSTING = struct.Struct('<III')  # document ID, raw TF, important TF
 BUCKETS = 256
@@ -29,12 +31,35 @@ def flush_bucket(path, buffer):
         buffer.clear()
 
 
+def source_signature(postings, documents):
+    postings_stat = postings.stat()
+    documents_stat = documents.stat()
+    return {"source_size": postings_stat.st_size, "source_mtime_ns": postings_stat.st_mtime_ns,
+            "documents_size": documents_stat.st_size, "documents_mtime_ns": documents_stat.st_mtime_ns}
+
+
 def optimize(index_dir):
     index_dir = Path(index_dir)
     source = index_dir / 'index.jsonl'
     docs = index_dir / 'documents.jsonl'
     if not source.is_file() or not docs.is_file():
         raise FileNotFoundError('Run src/main.py to create the original index first.')
+    signature = source_signature(source, docs)
+    target = index_dir / "optimized"
+    if target.exists():
+        try:
+            existing = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = None
+        if (isinstance(existing, dict) and existing.get("version") == VERSION
+                and all(existing.get(key) == value for key, value in signature.items())
+                and all((target / name).is_file() for name in ("postings.bin", "lengths.bin"))
+                and all((target / f"lex_{number:02x}.jsonl").is_file() for number in range(BUCKETS))):
+            print(f"Compact index already available at {target}.")
+            return existing
+        raise FileExistsError(f"Refusing to replace the existing compact index at {target}. "
+                              "Run src/main.py to publish a fresh generation.")
+
     ids = []
     with docs.open(encoding='utf-8') as f:
         for line in f:
@@ -43,7 +68,6 @@ def optimize(index_dir):
     if not ids or ids != list(range(len(ids))):
         raise ValueError('Expected nonempty documents.jsonl with consecutive numeric IDs.')
     lengths = [0] * len(ids)
-    target = index_dir / 'optimized'
     temp = Path(tempfile.mkdtemp(prefix='optimized-build-', dir=index_dir))
     count = 0
     posting_count = 0
@@ -82,13 +106,12 @@ def optimize(index_dir):
         # Explicit little-endian values for portability across platforms.
         with (temp / 'lengths.bin').open('wb') as f:
             f.write(struct.pack(f'<{len(lengths)}Q', *lengths))
+        if source_signature(source, docs) != signature:
+            raise RuntimeError("Index sources changed during optimization. Retry on a complete build.")
         manifest = {'version': VERSION, 'documents': len(ids), 'terms': count,
                     'postings': posting_count, 'average_length': sum(lengths) / len(lengths),
-                    'source_size': source.stat().st_size, 'source_mtime_ns': source.stat().st_mtime_ns,
-                    'documents_size': docs.stat().st_size, 'documents_mtime_ns': docs.stat().st_mtime_ns}
+                    **signature}
         (temp / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-        if target.exists():
-            shutil.rmtree(target)
         temp.rename(target)
     except BaseException:
         shutil.rmtree(temp, ignore_errors=True)
@@ -101,4 +124,7 @@ def optimize(index_dir):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--index-dir', type=Path, default=PROJECT_DIR / 'final_index')
-    optimize(parser.parse_args().index_dir)
+    try:
+        optimize(resolve_index_dir(parser.parse_args().index_dir))
+    except (OSError, ValueError, RuntimeError) as error:
+        parser.exit(1, f"{error}\n")
