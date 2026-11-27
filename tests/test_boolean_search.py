@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import unittest
@@ -33,3 +34,23 @@ class BooleanSearchTests(unittest.TestCase):
                                             text=True, check=True)
                     self.assertIn(second, result.stdout)
                     self.assertNotIn(first, result.stdout)
+
+    def test_top_five_do_not_depend_on_the_hash_seed(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            ids = (10, 41, 30, 2, 20, 1)
+            urls = {doc_id: f"https://example.com/{doc_id}" for doc_id in ids}
+            write_legacy_index(root, urls,
+                               {"sampl": {str(doc_id): {"tf": 1, "important_tf": 0}
+                                          for doc_id in ids}})
+            expected = [urls[doc_id] for doc_id in (1, 2, 10, 20, 30)]
+
+            for seed in ("0", "1", "2"):
+                result = subprocess.run(
+                    [sys.executable, "-B", "src/search.py", "--index-dir", str(root)],
+                    env={**os.environ, "PYTHONHASHSEED": seed},
+                    input="samples\n\n", text=True, capture_output=True, check=True,
+                )
+                actual = [line.split()[-1] for line in result.stdout.splitlines()
+                          if "https://" in line]
+                self.assertEqual(actual, expected, f"hash seed {seed}")

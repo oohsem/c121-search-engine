@@ -1,4 +1,5 @@
 import argparse
+from heapq import nsmallest
 from pathlib import Path
 
 from search_index import DEFAULT_INDEX_DIR, IndexArtifactError, IndexReader
@@ -30,7 +31,9 @@ def search_terms(terms, top_k, index):
         if not matches:
             return []
 
-    return [index.document_url(doc_id) for doc_id in matches][:top_k]
+    # The Boolean baseline has no relevance score. Use numeric document IDs
+    # as a reproducible order before taking the requested number of results.
+    return [index.document_url(doc_id) for doc_id in nsmallest(top_k, matches, key=int)]
 
 
 def main(argv=None):
