@@ -43,6 +43,12 @@ def query_terms(query, filter_stopwords):
     return Counter(terms)
 
 
+def rank_order(item, matches):
+    """Prefer greater term coverage, then score, then numeric document ID."""
+    doc, score = item
+    return -matches.get(doc, 0), -score, doc
+
+
 class PhraseIndexRequired(IndexArtifactError):
     """Exact phrase matching is unavailable until this index is rebuilt."""
 
@@ -156,10 +162,8 @@ class Ranker:
         scores, matches = self._score_query(terms)
         anchor_only = self._add_anchor_scores(terms, scores)
 
-        # Prefer complete matches, then cosine, then numeric document ID.
         def order(item):
-            doc, score = item
-            return doc in anchor_only, -matches.get(doc, 0), -score, doc
+            return (item[0] in anchor_only, *rank_order(item, matches))
 
         baseline = self._top_unique(scores.items(), order, top_k)
         positions = self.index.positions
@@ -255,7 +259,8 @@ class Ranker:
 
         # A long exact phrase can reject most documents even when all its
         # words are common. Verify it before scoring a dense candidate set.
-        if len(eligible) >= PHRASE_DENSE_CANDIDATES and any(len(plan) >= 4 for plan in phrase_plans):
+        verify_first = len(eligible) >= PHRASE_DENSE_CANDIDATES and any(len(plan) >= 4 for plan in phrase_plans)
+        if verify_first:
             cursors = dict.fromkeys(locations, 0)
             eligible = {
                 doc for doc in sorted(eligible)
@@ -263,16 +268,15 @@ class Ranker:
             }
             if not eligible:
                 return []
-            scores, matches = self._score_query(terms, eligible)
+        scores, matches = self._score_query(terms, eligible)
 
-            def order(item):
-                doc, score = item
-                return -matches.get(doc, 0), -score, doc
+        def order(item):
+            return rank_order(item, matches)
 
+        if verify_first:
             return self._top_unique(scores.items(), order, top_k)
 
-        scores, matches = self._score_query(terms, eligible)
-        candidates = [(-matches.get(doc, 0), -score, doc) for doc, score in scores.items()]
+        candidates = [order(item) for item in scores.items()]
         heapify(candidates)
         seen_urls = set()
         seen_groups = set()
@@ -311,10 +315,6 @@ class Ranker:
         if self.duplicate_groups is None:
             results.extend((doc, -score) for _, score, doc in nsmallest(top_k - len(results), remaining.values()))
             return results
-
-        def order(item):
-            doc, score = item
-            return -matches.get(doc, 0), -score, doc
 
         results.extend(self._top_unique(
             ((doc, -score) for _, score, doc in remaining.values()),
