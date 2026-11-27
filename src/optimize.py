@@ -4,13 +4,14 @@ Only one term's postings are decoded at a time. The lexicon is partitioned
 into 256 deterministic hash buckets, so search need not load it all.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import struct
 import tempfile
 
-from compact_format import BUCKETS, POSTING, VERSION, bucket_for
+from compact_format import BUCKETS, POSTING, VERSION, bucket_for, lexicon_row
 from index_storage import resolve_index_dir
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -86,8 +87,7 @@ def optimize(index_dir):
 
                 number = bucket_for(term)
                 buffer = buffers[number]
-                lexicon_row = json.dumps([term, offset, len(posts)], ensure_ascii=False, separators=(",", ":"))
-                buffer.extend((lexicon_row + "\n").encode("utf-8"))
+                buffer.extend(lexicon_row(term, offset, len(posts)))
                 if len(buffer) >= BUCKET_BUFFER_BYTES:
                     flush_bucket(bucket_paths[number], buffer)
                 count += 1
@@ -114,10 +114,48 @@ def optimize(index_dir):
     return manifest
 
 
+def verify(index_dir):
+    source = index_dir / "index.jsonl"
+    compact = index_dir / "optimized"
+    manifest = json.loads((compact / "manifest.json").read_text(encoding="utf-8"))
+    if manifest["version"] != VERSION:
+        raise ValueError("Cannot verify an unsupported compact index version.")
+
+    expected_buckets = [hashlib.sha256() for _ in range(BUCKETS)]
+    terms = posting_count = 0
+    with source.open(encoding="utf-8") as original, (compact / "postings.bin").open("rb") as binary:
+        for line in original:
+            record = json.loads(line)
+            term, postings = record["term"], record["postings"]
+            offset = binary.tell()
+            expected = bytearray()
+            for doc, stats in postings.items():
+                expected.extend(POSTING.pack(int(doc), stats["tf"], stats["important_tf"]))
+            if binary.read(len(expected)) != expected:
+                raise ValueError(f"Compact postings differ from JSONL for {term!r}.")
+            expected_buckets[bucket_for(term)].update(lexicon_row(term, offset, len(postings)))
+            terms += 1
+            posting_count += len(postings)
+        if binary.read(1) or terms != manifest["terms"] or posting_count != manifest["postings"]:
+            raise ValueError("Compact postings totals differ from the JSONL source or manifest.")
+
+    for number, expected in enumerate(expected_buckets):
+        with (compact / f"lex_{number:02x}.jsonl").open("rb") as bucket:
+            if hashlib.file_digest(bucket, "sha256").digest() != expected.digest():
+                raise ValueError(f"Compact lexicon bucket {number:02x} mismatches the JSONL source.")
+    print(f"Verified {terms:,} terms and {posting_count:,} postings against JSONL.")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--index-dir', type=Path, default=PROJECT_DIR / 'final_index')
+    parser.add_argument("--verify", action="store_true", help="Compare compact postings and lexicon against JSONL.")
+    args = parser.parse_args()
     try:
-        optimize(resolve_index_dir(parser.parse_args().index_dir))
+        directory = resolve_index_dir(args.index_dir)
+        if args.verify:
+            verify(directory)
+        else:
+            optimize(directory)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")

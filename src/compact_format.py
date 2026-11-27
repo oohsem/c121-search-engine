@@ -1,4 +1,5 @@
 """Layout shared by the compact postings writer and reader."""
+import json
 import struct
 import zlib
 
@@ -10,3 +11,8 @@ VERSION = 1
 
 def bucket_for(term):
     return zlib.crc32(term.encode("utf-8")) % BUCKETS
+
+
+def lexicon_row(term, offset, df):
+    row = json.dumps([term, offset, df], ensure_ascii=False, separators=(",", ":"))
+    return (row + "\n").encode("utf-8")
