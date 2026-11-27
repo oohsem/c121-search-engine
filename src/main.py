@@ -5,15 +5,15 @@ import shutil
 from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory, TemporaryFile
-from urllib.parse import urldefrag, urlsplit
 from uuid import uuid4
 
 from anchors import ANCHOR_INDEX, write_anchors
 from duplicates import DUPLICATE_GROUPS, DuplicateDetector
 from index_storage import publish_generation
+from links import PageLinks, canonical_url
 from parser import parse_html
 from positions import POSITION_DATA, POSITION_OFFSETS, position_writer
-from pagerank import PageLinks, write_pagerank
+from pagerank import write_pagerank
 from optimize import optimize
 from indexer import (
     DOCS_PER_PARTIAL,
@@ -68,22 +68,8 @@ def read_document(file_path, dataset_dir):
     raw_url = data.get("url")
     if not isinstance(raw_url, str):
         return None, "unusable_url"
-    raw_url = raw_url.strip()
-    address = raw_url.split("#", 1)[0]
-    # urllib strips some controls while parsing. Check what we will store first.
-    if any(ord(character) < 32 or ord(character) == 127 for character in address):
-        return None, "unusable_url"
-    try:
-        url = urldefrag(raw_url).url
-        parsed_url = urlsplit(url)
-        hostname = parsed_url.hostname
-        if parsed_url.scheme not in ("http", "https") or not hostname:
-            return None, "unusable_url"
-        if any(character.isspace() for character in hostname) or parsed_url.port == 0:
-            return None, "unusable_url"
-        # Reject ill-formed URLs before writing this generation's document map.
-        url.encode("utf-8")
-    except ValueError:
+    url = canonical_url(raw_url)
+    if url is None:
         return None, "unusable_url"
 
     content = data.get("content")
@@ -264,8 +250,9 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
             doc_record = {'id': document_count, "doc_id": doc_id, "url": url}
 
             doc_file.write(json.dumps(doc_record, ensure_ascii=False) + "\n")
-            link_file.write(json.dumps(links.targets(), ensure_ascii=False) + "\n")
-            anchor_file.write(json.dumps(list(links.anchored_targets()), ensure_ascii=False) + "\n")
+            targets, anchored_targets = links.rows()
+            link_file.write(json.dumps(targets, ensure_ascii=False) + "\n")
+            anchor_file.write(json.dumps(anchored_targets, ensure_ascii=False) + "\n")
             del links
 
             document_count += 1

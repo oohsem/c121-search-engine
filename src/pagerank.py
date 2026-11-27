@@ -3,75 +3,13 @@ import json
 import struct
 from array import array
 from tempfile import TemporaryFile
-from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from compact_format import PAGERANK_SCORE
+from links import PageLinks as PageLinks, canonical_url, resolve_link as resolve_link
 
 
 EDGE = struct.Struct("<II")  # source URL ID, destination URL ID
 EDGE_BLOCK_BYTES = 64 * 1024
-
-
-def canonical_url(url):
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname
-        port = parts.port
-    except ValueError:
-        return None
-    if (parts.scheme not in ("http", "https") or not host
-            or parts.username is not None or any(c.isspace() or not c.isprintable() for c in host)):
-        return None
-    host = f"[{host}]" if ":" in host else host
-    default_port = 80 if parts.scheme == "http" else 443
-    authority = host if port in (None, default_port) else f"{host}:{port}"
-    normalized = urlunsplit((parts.scheme, authority, parts.path or "/", parts.query, ""))
-    try:
-        normalized.encode("utf-8")
-    except UnicodeEncodeError:
-        return None
-    return normalized
-
-
-def resolve_link(base, href):
-    if not href or any(ord(c) < 32 or ord(c) == 127 for c in href):
-        return None
-    try:
-        return canonical_url(urljoin(base, href))
-    except ValueError:
-        return None
-
-
-class PageLinks:
-    def __init__(self, url):
-        self.url = url
-        self.base = None
-        self.hrefs = set()
-        self.anchor_labels = {}
-
-    def add(self, tag, href):
-        href = href.strip()
-        if tag == "base":
-            if self.base is None:
-                self.base = resolve_link(self.url, href) if href else self.url
-        elif href:
-            self.hrefs.add(href)
-
-    def targets(self):
-        base = self.base or self.url
-        return sorted({target for href in self.hrefs if (target := resolve_link(base, href))})
-
-    def add_anchor(self, href, label):
-        href = href.strip()
-        if href and label:
-            self.anchor_labels.setdefault(href, set()).add(label)
-
-    def anchored_targets(self):
-        base = self.base or self.url
-        for href, labels in self.anchor_labels.items():
-            target = resolve_link(base, href)
-            if target is not None:
-                yield target, sorted(labels)
 
 
 def solve(degrees, edges, damping, iterations, tol):

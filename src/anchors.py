@@ -4,7 +4,7 @@ import sqlite3
 from collections import defaultdict
 from contextlib import closing
 
-from pagerank import canonical_url
+from links import canonical_url
 from tokenizer import process_text
 
 
