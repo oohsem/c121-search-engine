@@ -5,7 +5,13 @@ from pathlib import Path
 from urllib.parse import urldefrag, urlsplit
 from parser import parse_html
 from optimize import optimize
-from indexer import DOCS_PER_PARTIAL, build_index, save_partial_index, merge_partial_indexes
+from indexer import (
+    DOCS_PER_PARTIAL,
+    POSTINGS_PER_PARTIAL,
+    build_index,
+    merge_partial_indexes,
+    save_partial_index,
+)
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
@@ -26,6 +32,10 @@ def parse_args(argv=None):
     parser.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
     parser.add_argument("--output-root", type=Path, default=PROJECT_DIR)
     parser.add_argument("--max-docs", type=positive_int, help="Limit a separate smoke build.")
+    parser.add_argument(
+        "--max-postings", type=positive_int, default=POSTINGS_PER_PARTIAL,
+        help="Spill after at least this many postings at a document boundary.",
+    )
     return parser.parse_args(argv)
 
 
@@ -157,6 +167,8 @@ def main(argv=None):
     document_count = 0
     skipped_by_reason = Counter()
     partial_count = 0
+    docs_in_partial = 0
+    postings_in_partial = 0
 
     # Store document IDs and URLs separately.
     with open(
@@ -185,7 +197,8 @@ def main(argv=None):
                 continue
 
             # Add document terms to the inverted index.
-            build_index(all_text, important_text, document_count, inverted_index)
+            postings_in_partial += build_index(all_text, important_text, document_count, inverted_index)
+            docs_in_partial += 1
 
             # Save document metadata.
             doc_record = {'id': document_count, "doc_id": doc_id, "url": url}
@@ -199,22 +212,19 @@ def main(argv=None):
 
                 print("Processed documents:", document_count)
 
-            # Save a partial index every 5,000 documents.
-            if document_count % DOCS_PER_PARTIAL == 0:
-
+            # Complete a document before spilling so its postings stay together.
+            if inverted_index and (
+                docs_in_partial >= DOCS_PER_PARTIAL or postings_in_partial >= args.max_postings
+            ):
                 partial_count += 1
-
-                print("Writing partial index:", partial_count)
-
+                print(f"Writing partial index {partial_count}: {postings_in_partial} postings")
                 save_partial_index(inverted_index, partial_dir, partial_count)
+                docs_in_partial = 0
+                postings_in_partial = 0
 
-    # Save any remaining terms.
     if inverted_index:
-
         partial_count += 1
-
-        print("Writing final partial index:", partial_count)
-
+        print(f"Writing final partial index {partial_count}: {postings_in_partial} postings")
         save_partial_index(inverted_index, partial_dir, partial_count)
 
     print("\nDocument processing complete.")

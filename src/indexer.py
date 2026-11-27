@@ -9,8 +9,9 @@ from contextlib import ExitStack
 from tokenizer import process_text
 
 
-# Write a partial index after every 5,000 documents.
+# Spill when either bound is reached.
 DOCS_PER_PARTIAL = 5000
+POSTINGS_PER_PARTIAL = 500_000
 
 
 def build_index(all_text, important_text, doc_num, index):
@@ -39,6 +40,9 @@ def build_index(all_text, important_text, doc_num, index):
             "tf": frequency,
             "important_tf": important_frequencies.get(term, 0)
         }
+
+
+    return len(term_frequencies)
 
 
 def save_partial_index(index, partial_dir, partial_number):
