@@ -8,6 +8,7 @@ POSTING = struct.Struct("<III")  # document ID, term frequency, important freque
 BUCKETS = 256
 # Base squared, base times emphasis, and emphasis squared for each document.
 NORM_COMPONENTS = struct.Struct("<ddd")
+DOCUMENT_LENGTH = struct.Struct("<Q")
 VERSION = 2
 SUPPORTED_VERSIONS = (1, VERSION)
 

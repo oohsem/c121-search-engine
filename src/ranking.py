@@ -57,13 +57,19 @@ def document_weight(frequency, important_frequency, important_boost):
 class Ranker:
     """Rank matches with the course's lnc.ltc weighting."""
 
-    def __init__(self, index, *, important_boost=0.75, filter_stopwords=True, prefer_coverage=True):
+    def __init__(self, index, *, important_boost=0.75, filter_stopwords=True,
+                 prefer_coverage=True, short_page_floor=0):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
         self.index = index
         self.important_boost = important_boost
         self.filter_stopwords = filter_stopwords
         self.prefer_coverage = prefer_coverage
+        self.content_weights = (
+            array("d", (sqrt(min(1.0, length / short_page_floor))
+                        for length in index.document_lengths()))
+            if short_page_floor > 0 else None
+        )
         self.norms = array("d")
         cross_weight = 2 * important_boost
         squared_weight = important_boost * important_boost
@@ -104,6 +110,8 @@ class Ranker:
                     matches[doc] = matches.get(doc, 0) + 1
         for doc in scores:
             scores[doc] /= self.norms[doc]
+            if self.content_weights is not None:
+                scores[doc] *= self.content_weights[doc]
         return scores, matches or {}
 
     def ranked_documents(self, query, top_k=5):

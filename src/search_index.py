@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 
-from compact_format import NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for
+from compact_format import DOCUMENT_LENGTH, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for
 
 from index_storage import resolve_index_dir
 
@@ -160,6 +160,17 @@ class IndexReader:
             return NORM_COMPONENTS.iter_unpack(data)
         except (OSError, ValueError) as error:
             raise IndexArtifactError(f"Cannot read document norms in {self.directory}: {error}") from error
+
+    def document_lengths(self):
+        if self.file is None or self.compact is None:
+            raise IndexArtifactError("Open a compact index before loading document lengths.")
+        try:
+            data = (self.compact / "lengths.bin").read_bytes()
+            if len(data) != len(self.doc_urls) * DOCUMENT_LENGTH.size:
+                raise ValueError("length file size does not match the document count")
+            return (length for length, in DOCUMENT_LENGTH.iter_unpack(data))
+        except (OSError, ValueError) as error:
+            raise IndexArtifactError(f"Cannot read document lengths in {self.directory}: {error}") from error
 
     def document_url(self, doc_id):
         try:
