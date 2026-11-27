@@ -5,6 +5,7 @@ import heapq
 from pathlib import Path
 from collections import Counter
 from contextlib import ExitStack
+from tempfile import TemporaryDirectory
 
 from tokenizer import process_text
 
@@ -68,89 +69,65 @@ def save_partial_index(index, partial_dir, partial_number):
 
     return partial_path
 
-def merge_partial_indexes(partial_files, final_path, lexicon_path):
+MAX_MERGE_INPUTS = 16
 
-    merged_term_count = 0
 
-    # Open all partial index files.
+def merge_runs(partial_files, output_path, lexicon=None):
     with ExitStack() as stack:
-
-        files = []
-
-        for partial_path in partial_files:
-            file = stack.enter_context(
-                open(partial_path, "r", encoding="utf-8")
-            )
-            files.append(file)
-
-        # The heap keeps the next term from each file.
+        inputs = [stack.enter_context(path.open(encoding="utf-8")) for path in partial_files]
+        output = stack.enter_context(output_path.open("wb"))
         heap = []
 
-        # Read the first record from each partial index.
-        for file_number, file in enumerate(files):
-
-            line = file.readline()
-
+        def read_next(file_number):
+            line = inputs[file_number].readline()
             if line:
                 record = json.loads(line)
+                heapq.heappush(heap, (record["term"], file_number, record["postings"]))
 
-                heapq.heappush(
-                    heap,
-                    (record["term"], file_number, record["postings"])
-                )
+        for file_number in range(len(inputs)):
+            read_next(file_number)
 
-        lexicon = {}
-        offset = 0
-        
-        # Write the merged index.
-        with open(final_path, "wb") as output:
+        while heap:
+            term = heap[0][0]
+            merged_postings = {}
+            while heap and heap[0][0] == term:
+                _, file_number, postings = heapq.heappop(heap)
+                merged_postings.update(postings)
+                read_next(file_number)
 
-            while heap:
+            if lexicon is not None:
+                lexicon[term] = output.tell()
+            record = {"term": term, "postings": merged_postings}
+            output.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
 
-                # Get the alphabetically smallest term.
-                current_term = heap[0][0]
 
-                merged_postings = {}
+def merge_partial_indexes(partial_files, final_path, lexicon_path):
+    partial_files = [Path(path) for path in partial_files]
+    final_path = Path(final_path)
+    lexicon = {}
 
-                # Collect postings for the same term.
-                while heap and heap[0][0] == current_term:
+    # Limit the fan-in even when a large corpus creates many runs.
+    with TemporaryDirectory(prefix="merge-", dir=final_path.parent) as directory:
+        temp_dir = Path(directory)
+        pass_number = 0
+        while len(partial_files) > MAX_MERGE_INPUTS:
+            next_runs = []
+            for start in range(0, len(partial_files), MAX_MERGE_INPUTS):
+                batch = partial_files[start:start + MAX_MERGE_INPUTS]
+                if len(batch) == 1:
+                    next_runs.append(batch[0])
+                    continue
+                merged_path = temp_dir / f"run-{pass_number}-{start}.jsonl"
+                merge_runs(batch, merged_path)
+                next_runs.append(merged_path)
+                for path in batch:
+                    if path.parent == temp_dir:
+                        path.unlink()
+            partial_files = next_runs
+            pass_number += 1
 
-                    term, file_number, postings = heapq.heappop(heap)
+        merge_runs(partial_files, final_path, lexicon)
 
-                    # Add this partial index's postings.
-                    merged_postings.update(postings)
-
-                    # Read the next record from that file.
-                    line = files[file_number].readline()
-
-                    if line:
-                        record = json.loads(line)
-
-                        heapq.heappush(
-                            heap,
-                            (
-                                record["term"],
-                                file_number,
-                                record["postings"]
-                            )
-                        )
-
-                # Write the merged term and its postings.
-                record = {
-                    "term": current_term,
-                    "postings": merged_postings
-                }
-
-                line = (json.dumps(record, ensure_ascii=False) + "\n").encode('utf-8')
-                lexicon[current_term] = offset
-                output.write(line)
-                offset += len(line)
-
-                merged_term_count += 1
-
-        with open(lexicon_path, 'w', encoding='utf-8') as lex_file:
-            lex_file.write(
-                json.dumps(lexicon, ensure_ascii=False)
-            )
-            
-    return merged_term_count
+    with Path(lexicon_path).open("w", encoding="utf-8") as lex_file:
+        json.dump(lexicon, lex_file, ensure_ascii=False)
+    return len(lexicon)
