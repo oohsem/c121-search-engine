@@ -1,0 +1,72 @@
+CS121 Project 3
+Milestone 3 evaluation queries
+
+Method
+
+The fixed set contains 10 initially weak and 10 initially strong queries.
+The starting point was log-TF cosine with query IDF. The strong group had
+at least three relevant results in its first five. The same Developer
+corpus, query intents, and unique-URL rule were used before and after tuning. Offline
+judgments were based on indexed URLs, titles, headings, and page text.
+P@5 is the fraction of the first five results judged relevant. Evaluation
+timed query receipt through result assembly, excluding display.
+
+Initially weak queries
+
+cristina lopes
+  Other staff and lab pages competed with the official faculty profiles. The HTML weight lifted the official profile higher within the top five.
+
+ACM
+  Incidental ACM mentions dominated for the broad acronym. An explicit programming-contest query is useful to compare.
+
+master of software engineering
+  Generic software-engineering slides crowded out the degree. Term coverage and important text lifted the program pages.
+
+uci computer science graduate admissions
+  Generic admissions and course pages outranked useful material. Matching more of the program terms helped.
+
+computer science undergraduate degree requirements
+  General academic pages missed the degree intent. More complete matching lifted useful ICS navigation.
+
+donald bren school of information and computer sciences
+  Unrelated computing pages matched scattered school words. Stronger coverage lifted an official school result.
+
+ics 46 data structures
+  Course-number tokens could match unrelated pages. Full matching lifted ICS 46 course material.
+
+ics 33 intermediate programming
+  The top five still mix course material and less useful pages at the selected settings.
+
+ics 45c programming in c++
+  Generic C++ material competed with course pages. Covering the course and language terms together helped.
+
+cs 121 information retrieval
+  General retrieval pages competed with the course. Full matching brought the specific course material forward.
+
+Initially strong queries
+
+machine learning
+david eppstein graph algorithms
+student council
+human computer interaction
+operating systems
+artificial intelligence
+tess tanenbaum
+software design and collaboration laboratory
+andré van der hoek
+cyber security club
+
+Changes and observed effects
+
+The final ranker prefers complete matches and fills remaining slots with
+partial matches. It uses selective query-time stopping, important HTML
+weighting, and a soft penalty for very short pages. The short-page penalty
+helped keep image-only and directory pages from outranking substantive
+machine-learning resources. The same scoring rules apply to every query.
+
+Across this offline set, P@5 rose from 0.43 to 0.66. Seven of the ten
+initially weak queries improved. The other three retained their scores.
+All ten initially strong queries retained or improved their scores.
+
+The 20 queries were timed four times each on the full index. The median
+was 20.4 ms and the slowest run was 52.3 ms. Every timed run met 300 ms.
