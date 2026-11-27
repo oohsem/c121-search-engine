@@ -17,17 +17,18 @@ def search(query, top_k=5, *, index=None):
     return search_terms(terms, top_k, index)
 
 
-def calculate_tfidf(tf, df, total_docs):
+def calculate_tfidf(tf, important_tf, df, total_docs):
 
-    # Terms that occur more frequently receive higher scores.
     tf_weight = 1 + math.log(tf)
 
-    # Terms that appear in fewer documents are more informative.
     idf_weight = math.log(
         (total_docs + 1) / (df + 1)
     ) + 1
 
-    return tf_weight * idf_weight
+    # Boost words appearing in important HTML elements.
+    important_weight = 1.5 * math.log1p(important_tf)
+
+    return (tf_weight + important_weight) * idf_weight
 
 
 def search_terms(terms, top_k, index):
@@ -72,11 +73,12 @@ def search_terms(terms, top_k, index):
         for postings in all_postings:
 
             tf = postings[doc_id]["tf"]
+            important_tf = postings[doc_id]["important_tf"]
             df = len(postings)
 
             score += calculate_tfidf(
-                tf, df, total_docs
-            )
+                tf, important_tf, df, total_docs
+)
 
         scores[doc_id] = score
 
