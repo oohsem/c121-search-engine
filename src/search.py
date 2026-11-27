@@ -17,23 +17,33 @@ def search(query, top_k=5, *, index=None):
 
 
 def search_terms(terms, top_k, index):
-    all_postings = []
-    for term in terms:
-        postings = index.get_postings(term)
-        if not postings:
+    if index.compact is not None:
+        plan = []
+        for term in terms:
+            location = index.posting_range(term)
+            if location is None:
+                return []
+            plan.append((term, location))
+        plan.sort(key=lambda item: item[1][1])
+        document_lists = (
+            (doc_id for doc_id, _, _ in index.iter_postings(term, location))
+            for term, location in plan
+        )
+    else:
+        all_postings = [index.get_postings(term) for term in terms]
+        if any(not postings for postings in all_postings):
             return []
-        all_postings.append(postings)
+        all_postings.sort(key=len)
+        document_lists = (map(int, postings) for postings in all_postings)
 
-    all_postings.sort(key=len)
-    matches = set(all_postings[0])
-    for postings in all_postings[1:]:
-        matches.intersection_update(postings)
+    matches = set(next(document_lists))
+    for documents in document_lists:
+        matches.intersection_update(documents)
         if not matches:
             return []
 
-    # The Boolean baseline has no relevance score. Use numeric document IDs
-    # as a reproducible order before taking the requested number of results.
-    return [index.document_url(doc_id) for doc_id in nsmallest(top_k, matches, key=int)]
+    # Boolean search has no relevance score. Sort by numeric document ID.
+    return [index.document_url(str(doc_id)) for doc_id in nsmallest(top_k, matches)]
 
 
 def main(argv=None):
