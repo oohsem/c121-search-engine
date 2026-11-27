@@ -13,7 +13,7 @@ import tempfile
 
 from compact_format import BUCKETS, NORM_COMPONENTS, POSTING, SUPPORTED_VERSIONS, VERSION, bucket_for, lexicon_row, source_signature
 from index_storage import resolve_index_dir
-from ranking import document_weights
+from term_weights import document_weights
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 BUCKET_BUFFER_BYTES = 16 * 1024

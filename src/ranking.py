@@ -1,13 +1,18 @@
 """Log-weighted vector-space ranking for the Developer corpus."""
 from array import array
 from collections import Counter
-from functools import lru_cache
 from heapq import heapify, heappop, nsmallest
-from math import isfinite, log10, sqrt
+from math import isfinite, sqrt
 from operator import itemgetter
 
 from positions import quoted_phrases, smallest_window
 from search_index import IndexArtifactError
+from term_weights import (
+    document_weight,
+    document_weights as document_weights,
+    log_tf as log_tf,
+    tf_idf,
+)
 from tokenizer import process_text
 
 
@@ -36,34 +41,6 @@ def query_terms(query, filter_stopwords):
     if len(informative) >= 2 and 3 * (len(terms) - len(informative)) <= len(terms):
         return Counter(informative)
     return Counter(terms)
-
-
-@lru_cache(maxsize=8192)
-def log_tf(frequency):
-    """A single occurrence weighs one, and an absent term weighs zero."""
-    return 1.0 + log10(frequency) if frequency > 0 else 0.0
-
-
-def tf_idf(frequency, documents, document_frequency):
-    if not 0 < document_frequency <= documents:
-        return 0.0
-    return log_tf(frequency) * log10(documents / document_frequency)
-
-
-
-def document_weights(frequency, important_frequency):
-    """Split a document coordinate into its base and HTML emphasis weights.
-
-    All occurrences contribute to the base. The second component is an
-    additional boost for occurrences in the title, headings, or bold text.
-    """
-    return log_tf(frequency), log_tf(important_frequency)
-
-
-def document_weight(frequency, important_frequency, important_boost):
-    base, emphasis = document_weights(frequency, important_frequency)
-    return base + important_boost * emphasis
-
 
 
 class PhraseIndexRequired(IndexArtifactError):

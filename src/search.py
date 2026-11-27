@@ -12,11 +12,10 @@ from ranking import (
     DEFAULT_SHORT_PAGE_FLOOR,
     PhraseIndexRequired,
     Ranker,
-    document_weight,
-    tf_idf,
 )
 from search_index import DEFAULT_INDEX_DIR, IndexArtifactError, IndexReader
 from snippets import matching_excerpt
+from term_weights import document_weight, tf_idf
 from tokenizer import process_text
 
 
