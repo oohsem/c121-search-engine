@@ -1,12 +1,15 @@
 """Read postings and document metadata from one index generation."""
 import json
+import sqlite3
 from array import array
+from contextlib import ExitStack
 from functools import lru_cache
 from math import isfinite
 from pathlib import Path
 from sys import byteorder
 from threading import Lock
 
+from anchors import ANCHOR_INDEX, open_anchors
 from compact_format import (
     DOCUMENT_LENGTH,
     NORM_COMPONENTS,
@@ -88,13 +91,16 @@ class IndexReader:
                 ):
                     raise ValueError("lexicon must map terms to nonnegative byte offsets")
             duplicate_groups = read_groups(directory / DUPLICATE_GROUPS, len(doc_urls))
-            file = postings_path.open("rb")
-            try:
+            with ExitStack() as handles:
+                file = handles.enter_context(postings_path.open("rb"))
                 positions = PositionIndex.open(directory, file, postings_count) if compact is not None else None
-            except BaseException:
-                file.close()
-                raise
-        except (OSError, ValueError, TypeError, KeyError) as error:
+                if positions is not None:
+                    handles.callback(positions.close)
+                anchors = open_anchors(directory / ANCHOR_INDEX)
+                if anchors is not None:
+                    handles.callback(anchors.close)
+                resources = handles.pop_all()
+        except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
             raise IndexArtifactError(
                 f"Cannot open index at {self.root}: {error}. Run python src/main.py to build it."
             ) from error
@@ -110,15 +116,30 @@ class IndexReader:
         self.doc_sources = doc_sources
         self.file = file
         self.positions = positions
+        self.anchors = anchors
+        self._resources = resources
         self.duplicate_groups = duplicate_groups
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.positions is not None:
-            self.positions.close()
-        self.file.close()
+        self._resources.close()
         self.file = None
         self._bucket.cache_clear()
+
+    def anchor_postings(self, term):
+        if self.file is None:
+            raise RuntimeError("Open the index before reading anchor postings.")
+        if self.anchors is None:
+            return
+        try:
+            for doc, sources in self.anchors.execute(
+                "SELECT doc, sources FROM postings WHERE term = ?", (term,),
+            ):
+                if type(doc) is not int or type(sources) is not int or doc < 0 or sources < 1:
+                    raise ValueError("invalid incoming anchor posting")
+                yield doc, sources
+        except (sqlite3.Error, ValueError) as error:
+            raise IndexArtifactError(f"Cannot read anchor postings for {term!r}: {error}") from error
 
     def get_postings(self, term):
         if self.file is None:

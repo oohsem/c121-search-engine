@@ -47,6 +47,7 @@ class PageLinks:
         self.url = url
         self.base = None
         self.hrefs = set()
+        self.anchor_labels = {}
 
     def add(self, tag, href):
         href = href.strip()
@@ -59,6 +60,18 @@ class PageLinks:
     def targets(self):
         base = self.base or self.url
         return sorted({target for href in self.hrefs if (target := resolve_link(base, href))})
+
+    def add_anchor(self, href, label):
+        href = href.strip()
+        if href and label:
+            self.anchor_labels.setdefault(href, set()).add(label)
+
+    def anchored_targets(self):
+        base = self.base or self.url
+        for href, labels in self.anchor_labels.items():
+            target = resolve_link(base, href)
+            if target is not None:
+                yield target, sorted(labels)
 
 
 def solve(degrees, edges, damping, iterations, tol):

@@ -12,6 +12,7 @@ from tokenizer import process_text
 
 
 DEFAULT_IMPORTANT_BOOST = 0.35
+DEFAULT_ANCHOR_WEIGHT = 0.12
 DEFAULT_PAGERANK_WEIGHT = 0.08
 DEFAULT_PROXIMITY_WEIGHT = 0.10
 DEFAULT_SHORT_PAGE_FLOOR = 85
@@ -75,7 +76,8 @@ class Ranker:
     def __init__(self, index, *, important_boost=DEFAULT_IMPORTANT_BOOST, filter_stopwords=True,
                  prefer_coverage=True, short_page_floor=DEFAULT_SHORT_PAGE_FLOOR,
                  pagerank_weight=DEFAULT_PAGERANK_WEIGHT,
-                 proximity_weight=DEFAULT_PROXIMITY_WEIGHT, collapse_duplicates=True):
+                 proximity_weight=DEFAULT_PROXIMITY_WEIGHT, collapse_duplicates=True,
+                 anchor_weight=DEFAULT_ANCHOR_WEIGHT):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
         if type(short_page_floor) is not int or short_page_floor < 0:
@@ -84,9 +86,12 @@ class Ranker:
             raise ValueError("PageRank weight must be between zero and one.")
         if not isfinite(proximity_weight) or not 0.0 <= proximity_weight <= 1.0:
             raise ValueError("Proximity weight must be between zero and one.")
+        if not isfinite(anchor_weight) or not 0.0 <= anchor_weight <= 1.0:
+            raise ValueError("Anchor text weight must be between zero and one.")
         self.index = index
         self.duplicate_groups = getattr(index, "duplicate_groups", None) if collapse_duplicates else None
         self.proximity_weight = proximity_weight
+        self.anchor_weight = anchor_weight
         authority = index.pagerank_scores() if pagerank_weight else None
         self.authority_bonus = (
             array("d", (pagerank_weight * rank / (1.0 + rank) for rank in authority))
@@ -151,17 +156,33 @@ class Ranker:
     def ranked_terms(self, terms, top_k=5):
         return self._rank(Counter(terms), top_k)
 
+    def _add_anchor_scores(self, terms, scores):
+        if not terms or not self.anchor_weight or getattr(self.index, "anchors", None) is None:
+            return set()
+        anchor_scores = {}
+        scale = self.anchor_weight / len(terms)
+        for term in terms:
+            for doc, sources in self.index.anchor_postings(term):
+                if doc >= len(self.norms):
+                    raise IndexArtifactError(f"Unknown document in anchor posting {doc}.")
+                anchor_scores[doc] = anchor_scores.get(doc, 0.0) + scale * sources / (1 + sources)
+        anchor_only = anchor_scores.keys() - scores.keys()
+        for doc, score in anchor_scores.items():
+            scores[doc] = scores.get(doc, 0.0) + score
+        return anchor_only
+
     def _rank(self, terms, top_k, phrases=()):
         if top_k <= 0:
             return []
         if phrases:
             return self._rank_phrases(terms, phrases, top_k)
         scores, matches = self._score_query(terms)
+        anchor_only = self._add_anchor_scores(terms, scores)
 
         # Prefer complete matches, then cosine, then numeric document ID.
         def order(item):
             doc, score = item
-            return -matches.get(doc, 0), -score, doc
+            return doc in anchor_only, -matches.get(doc, 0), -score, doc
 
         baseline = self._top_unique(scores.items(), order, top_k)
         positions = self.index.positions
@@ -177,7 +198,7 @@ class Ranker:
         candidates.update(baseline)
         rescored = []
         for doc, score in candidates.items():
-            rows = positions.rows(doc, locations, terms)
+            rows = positions.rows(doc, locations, terms) if doc not in anchor_only else None
             if rows is not None:
                 span = smallest_window(terms, lambda term: positions.values(rows[term]))
                 if span is not None:

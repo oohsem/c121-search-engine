@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory, TemporaryFile
 from urllib.parse import urldefrag, urlsplit
 from uuid import uuid4
 
+from anchors import ANCHOR_INDEX, write_anchors
 from duplicates import DUPLICATE_GROUPS, DuplicateDetector
 from index_storage import publish_generation
 from parser import parse_html
@@ -192,6 +193,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
     documents_path = final_dir / "documents.jsonl"
     lexicon_path = final_dir / "lexicon.json"
     links_path = partial_dir / "links.jsonl"
+    anchors_path = partial_dir / "anchors.jsonl"
 
     print("Build mode:", "smoke" if max_docs is not None else "full")
     print("Dataset:", dataset_dir)
@@ -210,6 +212,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
     with (
         documents_path.open("w", encoding="utf-8") as doc_file,
         links_path.open("w", encoding="utf-8", newline="\n") as link_file,
+        anchors_path.open("w", encoding="utf-8", newline="\n") as anchor_file,
         TemporaryFile(dir=partial_dir) as representative_texts,
     ):
         # Keep reusable visible text on disk for candidate verification.
@@ -242,7 +245,9 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
             doc_id = document["doc_id"]
             url = document["url"]
             links = PageLinks(url)
-            all_text, important_text = parse_html(document.pop("content"), on_link=links.add)
+            all_text, important_text = parse_html(
+                document.pop("content"), on_link=links.add, on_anchor=links.add_anchor,
+            )
             if not all_text or all_text.isspace():
                 skipped_by_reason["empty_content"] += 1
                 continue
@@ -260,6 +265,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
             doc_file.write(json.dumps(doc_record, ensure_ascii=False) + "\n")
             link_file.write(json.dumps(links.targets(), ensure_ascii=False) + "\n")
+            anchor_file.write(json.dumps(list(links.anchored_targets()), ensure_ascii=False) + "\n")
             del links
 
             document_count += 1
@@ -317,9 +323,12 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
     print("Merging complete.")
 
+    anchor_index = final_dir / ANCHOR_INDEX
+    write_anchors(documents_path, anchors_path, anchor_index)
+
     # Calculate the total size of the final index files.
     index_paths = (index_path, documents_path, lexicon_path,
-                   final_dir / POSITION_OFFSETS, final_dir / POSITION_DATA, duplicates_path)
+                   final_dir / POSITION_OFFSETS, final_dir / POSITION_DATA, duplicates_path, anchor_index)
     index_size_bytes = sum(path.stat().st_size for path in index_paths)
 
     index_size_kb = index_size_bytes / 1024

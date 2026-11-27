@@ -5,6 +5,7 @@ from sys import stderr
 from time import perf_counter
 
 from ranking import (
+    DEFAULT_ANCHOR_WEIGHT,
     DEFAULT_IMPORTANT_BOOST,
     DEFAULT_PAGERANK_WEIGHT,
     DEFAULT_PROXIMITY_WEIGHT,
@@ -95,6 +96,8 @@ def main(argv=None, *, boolean=False):
                         help="Keep every word from the ranked query.")
     parser.add_argument("--important-boost", type=float, default=DEFAULT_IMPORTANT_BOOST,
                         help="Weight given to words in titles, headings, and bold text.")
+    parser.add_argument("--anchor-weight", type=float, default=DEFAULT_ANCHOR_WEIGHT,
+                        help="Weight of incoming anchor text; 0 disables it.")
     parser.add_argument("--pagerank-weight", type=float, default=DEFAULT_PAGERANK_WEIGHT,
                         help="Weight of offline link authority; 0 uses text relevance alone.")
     parser.add_argument("--proximity-weight", type=float, default=DEFAULT_PROXIMITY_WEIGHT,
@@ -119,6 +122,7 @@ def main(argv=None, *, boolean=False):
                 filter_stopwords=not args.keep_stopwords, short_page_floor=args.short_page_floor,
                 pagerank_weight=args.pagerank_weight, proximity_weight=args.proximity_weight,
                 collapse_duplicates=not args.show_duplicates,
+                anchor_weight=args.anchor_weight,
             )
             while True:
                 try:
