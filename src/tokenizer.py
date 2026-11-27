@@ -1,8 +1,11 @@
 
+from functools import lru_cache
+
 from nltk.stem import PorterStemmer
 
 # Create the stemmer once so we can reuse it.
 stemmer = PorterStemmer()
+stem_word = lru_cache(maxsize=32768)(stemmer.stem)
 
 
 def tokenize(text):
@@ -32,7 +35,7 @@ def stem_tokens(tokens):
 
     # Stem each token using the Porter stemmer.
     for token in tokens:
-        stemmed_word = stemmer.stem(token)
+        stemmed_word = stem_word(token)
         stemmed_tokens.append(stemmed_word)
 
     return stemmed_tokens
