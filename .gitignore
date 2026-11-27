@@ -8,6 +8,7 @@ dataset/
 
 partial_indexes/
 final_index/
+smoke_index/
 
 .vscode/
 .idea/

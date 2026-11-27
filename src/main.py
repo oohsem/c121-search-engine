@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 from urllib.parse import urldefrag
@@ -9,26 +10,25 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 DATASET_DIR = PROJECT_DIR / "dataset"
 
-FINAL_DIR = PROJECT_DIR / "final_index"
-
-PARTIAL_DIR = PROJECT_DIR / "partial_indexes"
-
-FINAL_INDEX_PATH = FINAL_DIR / "index.jsonl"
-
-DOCUMENTS_PATH = FINAL_DIR / "documents.jsonl"
-
-LEXICON_PATH = FINAL_DIR/ 'lexicon.json'
-
-REPORT_PATH = FINAL_DIR / "milestone1_report.txt"
+def positive_int(value):
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive integer") from error
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
 
 
-def get_json_files():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Build the CS121 inverted index.")
+    parser.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
+    parser.add_argument("--output-root", type=Path, default=PROJECT_DIR)
+    parser.add_argument("--max-docs", type=positive_int, help="Limit a separate smoke build.")
+    return parser.parse_args(argv)
 
-    # Find all JSON files, including files in subdirectories.
-    return DATASET_DIR.rglob("*.json")
 
-
-def read_document(file_path):
+def read_document(file_path, dataset_dir):
 
     try:
 
@@ -59,7 +59,7 @@ def read_document(file_path):
         url = urldefrag(url).url
 
         # Use the relative file path as the document ID.
-        doc_id = file_path.relative_to(DATASET_DIR).as_posix()
+        doc_id = file_path.relative_to(dataset_dir).as_posix()
 
         return {
             "doc_id": doc_id,
@@ -74,13 +74,20 @@ def read_document(file_path):
         return None
 
 
-def generate_report(document_count,unique_token_count,partial_count,skipped_count,index_size_kb):
+def generate_report(document_count, unique_token_count, partial_count, skipped_count,
+                    index_size_kb, dataset_dir, max_docs, index_paths):
 
     # Create the report contents.
     report = []
 
     report.append("MILESTONE 1: INVERTED INDEX REPORT")
     report.append("====================================")
+    report.append("")
+
+    build_mode = "smoke" if max_docs is not None else "full"
+    report.append(f"Build mode: {build_mode}")
+    report.append(f"Dataset: {dataset_dir}")
+    report.append(f"Document limit: {max_docs if max_docs is not None else 'none'}")
     report.append("")
 
     report.append("INDEX ANALYTICS")
@@ -116,39 +123,36 @@ def generate_report(document_count,unique_token_count,partial_count,skipped_coun
     report.append("INDEX FILES")
     report.append("-----------")
 
-    report.append(str(FINAL_INDEX_PATH))
-    report.append(str(DOCUMENTS_PATH))
-    report.append(str(LEXICON_PATH))
-
-    # Write the report to a text file.
-    with open(REPORT_PATH, "w", encoding="utf-8") as file:
-
-        for line in report:
-            file.write(line + "\n")
-
-    print("\nReport generated at:", REPORT_PATH)
+    report.extend(str(path) for path in index_paths)
+    report_path = index_paths[0].parent / "milestone1_report.txt"
+    report_path.write_text("\n".join(report) + "\n", encoding="utf-8")
+    print("\nReport generated at:", report_path)
 
 
-def main():
+def main(argv=None):
+    args = parse_args(argv)
+    dataset_dir = args.dataset_dir.resolve()
+    if not dataset_dir.is_dir():
+        raise SystemExit(f"Dataset directory not found: {dataset_dir}")
 
-    # Check whether the dataset directory exists.
-    if not DATASET_DIR.exists():
+    max_docs = args.max_docs
+    output_root = args.output_root.resolve()
+    if max_docs is not None:
+        output_root /= "smoke_index"
+    final_dir = output_root / "final_index"
+    partial_dir = output_root / "partial_indexes"
+    index_path = final_dir / "index.jsonl"
+    documents_path = final_dir / "documents.jsonl"
+    lexicon_path = final_dir / "lexicon.json"
+    final_dir.mkdir(parents=True, exist_ok=True)
+    partial_dir.mkdir(parents=True, exist_ok=True)
 
-        print("Dataset directory not found:", DATASET_DIR)
-
-        return
-
-    # Set this to an integer to limit processing during testing.
-    # Keep None to process the entire dataset.
-    max_docs = None
-
-    # Create the output directories.
-    FINAL_DIR.mkdir(parents=True, exist_ok=True)
-
-    PARTIAL_DIR.mkdir(parents=True, exist_ok=True)
+    print("Build mode:", "smoke" if max_docs is not None else "full")
+    print("Dataset:", dataset_dir)
+    print("Document limit:", max_docs if max_docs is not None else "none")
 
     # Remove old partial indexes from previous runs.
-    for old_file in PARTIAL_DIR.glob("partial_*.jsonl"):
+    for old_file in partial_dir.glob("partial_*.jsonl"):
         old_file.unlink()
 
     print("Starting index construction...")
@@ -162,19 +166,19 @@ def main():
 
     # Store document IDs and URLs separately.
     with open(
-        DOCUMENTS_PATH,
+        documents_path,
         "w",
         encoding="utf-8"
     ) as doc_file:
 
-        for file_path in get_json_files():
+        for file_path in dataset_dir.rglob("*.json"):
 
             # Stop if the maximum document limit is reached.
             if max_docs is not None:
                 if document_count >= max_docs:
                     break
 
-            document = read_document(file_path)
+            document = read_document(file_path, dataset_dir)
 
             # Skip documents that could not be read.
             if document is None:
@@ -214,7 +218,7 @@ def main():
 
                 print("Writing partial index:", partial_count)
 
-                save_partial_index(inverted_index, PARTIAL_DIR, partial_count)
+                save_partial_index(inverted_index, partial_dir, partial_count)
 
     # Save any remaining terms.
     if inverted_index:
@@ -223,7 +227,7 @@ def main():
 
         print("Writing final partial index:", partial_count)
 
-        save_partial_index(inverted_index, PARTIAL_DIR, partial_count)
+        save_partial_index(inverted_index, partial_dir, partial_count)
 
     print("\nDocument processing complete.")
 
@@ -234,22 +238,22 @@ def main():
     print("Partial indexes created:", partial_count)
 
     # Check the assignment's minimum partial-index requirement.
-    if partial_count < 3:
+    if max_docs is None and partial_count < 3:
 
         print("WARNING: Fewer than three partial indexes were created.")
 
     # Find all generated partial indexes.
-    partial_files = sorted(PARTIAL_DIR.glob("partial_*.jsonl"))
+    partial_files = sorted(partial_dir.glob("partial_*.jsonl"))
 
     # Merge the partial indexes.
     print("\nMerging partial indexes...")
 
-    unique_token_count = merge_partial_indexes(partial_files, FINAL_INDEX_PATH, LEXICON_PATH)
+    unique_token_count = merge_partial_indexes(partial_files, index_path, lexicon_path)
 
     print("Merging complete.")
 
     # Calculate the total size of the final index files.
-    index_size_bytes = (FINAL_INDEX_PATH.stat().st_size + DOCUMENTS_PATH.stat().st_size + LEXICON_PATH.stat().st_size)
+    index_size_bytes = (index_path.stat().st_size + documents_path.stat().st_size + lexicon_path.stat().st_size)
 
     index_size_kb = index_size_bytes / 1024
 
@@ -265,12 +269,13 @@ def main():
     print("=====================================")
 
     # Generate the Milestone 1 report.
-    generate_report(document_count, unique_token_count, partial_count, skipped_count,index_size_kb)
+    generate_report(document_count, unique_token_count, partial_count, skipped_count,
+                    index_size_kb, dataset_dir, max_docs, (index_path, documents_path, lexicon_path))
 
-    print("\nFinal index saved at:", FINAL_INDEX_PATH)
+    print("\nFinal index saved at:", index_path)
 
     # Build the compact disk-backed index required by Milestone 3.
-    optimize(FINAL_DIR)
+    optimize(final_dir)
 
 
 if __name__ == "__main__":
