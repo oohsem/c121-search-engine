@@ -19,9 +19,11 @@ from compact_format import (
 )
 
 from index_storage import resolve_index_dir
+from positions import PositionIndex
 
 
 DEFAULT_INDEX_DIR = Path(__file__).resolve().parent.parent / "final_index"
+POSTINGS_PER_READ = 4096
 
 
 class IndexArtifactError(RuntimeError):
@@ -85,6 +87,11 @@ class IndexReader:
                 ):
                     raise ValueError("lexicon must map terms to nonnegative byte offsets")
             file = postings_path.open("rb")
+            try:
+                positions = PositionIndex.open(directory, file, postings_count) if compact is not None else None
+            except BaseException:
+                file.close()
+                raise
         except (OSError, ValueError, TypeError, KeyError) as error:
             raise IndexArtifactError(
                 f"Cannot open index at {self.root}: {error}. Run python src/main.py to build it."
@@ -100,9 +107,12 @@ class IndexReader:
         self.doc_urls = doc_urls
         self.doc_sources = doc_sources
         self.file = file
+        self.positions = positions
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if self.positions is not None:
+            self.positions.close()
         self.file.close()
         self.file = None
         self._bucket.cache_clear()
@@ -160,15 +170,18 @@ class IndexReader:
         location = self.posting_range(term) if location is None else location
         if location is None:
             return iter(())
-        offset, df = location
-        size = df * POSTING.size
+        return self._compact_postings(term, *location)
+
+    def _compact_postings(self, term, offset, df):
         try:
-            with self._file_lock:
-                self.file.seek(offset)
-                data = self.file.read(size)
-            if len(data) != size:
-                raise ValueError("truncated postings list")
-            return POSTING.iter_unpack(data)
+            for start in range(0, df, POSTINGS_PER_READ):
+                size = min(POSTINGS_PER_READ, df - start) * POSTING.size
+                with self._file_lock:
+                    self.file.seek(offset + start * POSTING.size)
+                    data = self.file.read(size)
+                if len(data) != size:
+                    raise ValueError("truncated postings list")
+                yield from POSTING.iter_unpack(data)
         except (OSError, ValueError) as error:
             raise IndexArtifactError(f"Cannot read postings for {term!r} in {self.directory}: {error}") from error
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from contextlib import ExitStack
 from tempfile import TemporaryDirectory
 
+from positions import position_terms
 from tokenizer import count_terms
 
 
@@ -14,28 +15,18 @@ DOCS_PER_PARTIAL = 5000
 POSTINGS_PER_PARTIAL = 100_000
 
 
-def build_index(all_text, important_text, doc_num, index):
-
-    # Count stems as they are read so a large document does not retain
-    # a list of every token and a second list of every stem.
-    term_frequencies = count_terms(all_text)
+def build_index(all_text, important_text, doc_num, index, *, positions=False):
+    terms = (position_terms(all_text) if positions else
+             ((term, frequency, None) for term, frequency in count_terms(all_text).items()))
     important_frequencies = count_terms(important_text)
-
-    # Add each term to the inverted index.
-    for term, frequency in term_frequencies.items():
-
-        # Create a dictionary for the term if it does not exist.
-        if term not in index:
-            index[term] = {}
-
-        # Store the document ID and term frequencies.
-        index[term][doc_num] = {
-            "tf": frequency,
-            "important_tf": important_frequencies.get(term, 0)
-        }
-
-
-    return len(term_frequencies)
+    term_count = 0
+    for term, frequency, encoded in terms:
+        stats = {"tf": frequency, "important_tf": important_frequencies.get(term, 0)}
+        if encoded is not None:
+            stats["positions"] = encoded
+        index.setdefault(term, {})[doc_num] = stats
+        term_count += 1
+    return term_count
 
 
 def save_partial_index(index, partial_dir, partial_number):
@@ -64,7 +55,7 @@ def save_partial_index(index, partial_dir, partial_number):
 MAX_MERGE_INPUTS = 16
 
 
-def merge_runs(partial_files, output_path, lexicon_file=None):
+def merge_runs(partial_files, output_path, lexicon_file=None, append_positions=None):
     with ExitStack() as stack:
         inputs = [stack.enter_context(path.open(encoding="utf-8")) for path in partial_files]
         output = stack.enter_context(output_path.open("wb"))
@@ -90,6 +81,14 @@ def merge_runs(partial_files, output_path, lexicon_file=None):
                 merged_postings.update(postings)
                 read_next(file_number)
 
+            if append_positions is not None:
+                # Compact postings take this order from the merged JSONL.
+                ordered = {}
+                for doc_id in sorted(merged_postings, key=int):
+                    stats = merged_postings.pop(doc_id)
+                    append_positions(stats.pop("positions"))
+                    ordered[doc_id] = stats
+                merged_postings = ordered
             if lexicon_file is not None:
                 prefix = "," if term_count else ""
                 key = json.dumps(term, ensure_ascii=False)
@@ -102,7 +101,7 @@ def merge_runs(partial_files, output_path, lexicon_file=None):
         return term_count
 
 
-def merge_partial_indexes(partial_files, final_path, lexicon_path):
+def merge_partial_indexes(partial_files, final_path, lexicon_path, *, append_positions=None):
     partial_files = [Path(path) for path in partial_files]
     final_path = Path(final_path)
 
@@ -128,4 +127,4 @@ def merge_partial_indexes(partial_files, final_path, lexicon_path):
 
         # Stream the legacy term/offset mapping as the final postings are written.
         with Path(lexicon_path).open("w", encoding="utf-8") as lexicon_file:
-            return merge_runs(partial_files, final_path, lexicon_file)
+            return merge_runs(partial_files, final_path, lexicon_file, append_positions)

@@ -1,12 +1,15 @@
 import argparse
 from heapq import nsmallest
 from pathlib import Path
+from sys import stderr
 from time import perf_counter
 
 from ranking import (
     DEFAULT_IMPORTANT_BOOST,
     DEFAULT_PAGERANK_WEIGHT,
+    DEFAULT_PROXIMITY_WEIGHT,
     DEFAULT_SHORT_PAGE_FLOOR,
+    PhraseIndexRequired,
     Ranker,
     document_weight,
     tf_idf,
@@ -82,7 +85,9 @@ def boolean_search_terms(terms, top_k, index):
 
 
 def main(argv=None, *, boolean=False):
-    parser = argparse.ArgumentParser(description="Search the indexed Developer corpus.")
+    parser = argparse.ArgumentParser(
+        description='Search the indexed Developer corpus. Use double quotes for an exact phrase.',
+    )
     parser.add_argument("--index-dir", type=Path, default=DEFAULT_INDEX_DIR)
     parser.add_argument("--boolean", action="store_true", default=boolean,
                         help="Run the Milestone 2 Boolean search.")
@@ -92,6 +97,8 @@ def main(argv=None, *, boolean=False):
                         help="Weight given to words in titles, headings, and bold text.")
     parser.add_argument("--pagerank-weight", type=float, default=DEFAULT_PAGERANK_WEIGHT,
                         help="Weight of offline link authority; 0 uses text relevance alone.")
+    parser.add_argument("--proximity-weight", type=float, default=DEFAULT_PROXIMITY_WEIGHT,
+                        help="Proximity boost for unquoted ranked queries; 0 disables it.")
     parser.add_argument("--short-page-floor", type=int, default=DEFAULT_SHORT_PAGE_FLOOR,
                         help="Token threshold for the short-page penalty; 0 disables it.")
     parser.add_argument("--snippets", action="store_true",
@@ -108,7 +115,7 @@ def main(argv=None, *, boolean=False):
             ranker = None if args.boolean else Ranker(
                 index, important_boost=args.important_boost,
                 filter_stopwords=not args.keep_stopwords, short_page_floor=args.short_page_floor,
-                pagerank_weight=args.pagerank_weight,
+                pagerank_weight=args.pagerank_weight, proximity_weight=args.proximity_weight,
             )
             while True:
                 try:
@@ -121,14 +128,18 @@ def main(argv=None, *, boolean=False):
                     break
                 if ranker is None:
                     results = [(url, "") for url in boolean_search(query, index=index)]
-                elif dataset is None:
-                    results = [(url, "") for url in ranker.search(query)]
                 else:
-                    terms = set(process_text(query))
+                    try:
+                        hits = ranker.ranked_documents(query)
+                    except PhraseIndexRequired as error:
+                        print(error, file=stderr)
+                        continue
+                    terms = set(process_text(query)) if dataset is not None else None
                     results = []
-                    for doc, _ in ranker.ranked_documents(query):
+                    for doc, _ in hits:
                         url = index.document_url(str(doc))
-                        excerpt = matching_excerpt(terms, dataset, index.doc_sources.get(doc), url)
+                        excerpt = (matching_excerpt(terms, dataset, index.doc_sources.get(doc), url)
+                                   if dataset is not None else "")
                         results.append((url, excerpt))
                 elapsed = (perf_counter() - started) * 1000
                 for rank, (url, excerpt) in enumerate(results, 1):

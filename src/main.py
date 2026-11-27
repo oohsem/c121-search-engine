@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from index_storage import publish_generation
 from parser import parse_html
+from positions import POSITION_DATA, POSITION_OFFSETS, position_writer
 from pagerank import PageLinks, write_pagerank
 from optimize import optimize
 from indexer import (
@@ -245,7 +246,8 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
                 continue
 
             # Add document terms to the inverted index.
-            postings_in_partial += build_index(all_text, important_text, document_count, inverted_index)
+            postings_in_partial += build_index(
+                all_text, important_text, document_count, inverted_index, positions=True)
             del all_text, important_text
             docs_in_partial += 1
 
@@ -300,12 +302,16 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
     # Merge the partial indexes.
     print("\nMerging partial indexes...")
 
-    unique_token_count = merge_partial_indexes(partial_files, index_path, lexicon_path)
+    with position_writer(final_dir) as append_positions:
+        unique_token_count = merge_partial_indexes(
+            partial_files, index_path, lexicon_path, append_positions=append_positions)
 
     print("Merging complete.")
 
     # Calculate the total size of the final index files.
-    index_size_bytes = (index_path.stat().st_size + documents_path.stat().st_size + lexicon_path.stat().st_size)
+    index_paths = (index_path, documents_path, lexicon_path,
+                   final_dir / POSITION_OFFSETS, final_dir / POSITION_DATA)
+    index_size_bytes = sum(path.stat().st_size for path in index_paths)
 
     index_size_kb = index_size_bytes / 1024
 
@@ -322,7 +328,7 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
     # Generate the Milestone 1 report.
     generate_report(document_count, unique_token_count, partial_count, skipped_by_reason,
-                    index_size_kb, dataset_dir, max_docs, (index_path, documents_path, lexicon_path))
+                    index_size_kb, dataset_dir, max_docs, index_paths)
 
     # Build the compact disk-backed index required by Milestone 3.
     optimize(final_dir)
