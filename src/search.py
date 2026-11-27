@@ -8,6 +8,9 @@ from search_index import DEFAULT_INDEX_DIR, IndexArtifactError, IndexReader
 from tokenizer import process_text
 
 
+QUERY_LIMIT_MS = 300.0
+
+
 def search(query, top_k=5, *, index=None):
     terms = list(dict.fromkeys(process_text(query)))
     if not terms:
@@ -75,7 +78,8 @@ def main(argv=None, *, boolean=False):
                     print(f"{rank}. {url}")
                 if not results:
                     print("No results.")
-                print(f"Query time: {elapsed:.1f} ms")
+                limit_status = " (over 300 ms)" if elapsed > QUERY_LIMIT_MS else ""
+                print(f"Query time: {elapsed:.1f} ms{limit_status}")
     except (IndexArtifactError, ValueError) as error:
         parser.exit(1, f"{error}\n")
 
