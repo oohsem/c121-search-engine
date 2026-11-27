@@ -1,19 +1,7 @@
-from bs4 import (BeautifulSoup, Comment, XMLParsedAsHTMLWarning, MarkupResemblesLocatorWarning)
-
 import warnings
 
-
-# Ignore warnings when XML or URL-like content is encountered.
-warnings.filterwarnings(
-    "ignore",
-    category=XMLParsedAsHTMLWarning
-)
-
-warnings.filterwarnings(
-    "ignore",
-    category=MarkupResemblesLocatorWarning
-)
-
+from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning, XMLParsedAsHTMLWarning
+from bs4.element import Comment, Declaration, Doctype, ProcessingInstruction
 
 
 IMPORTANT_TAGS = {"title", "h1", "h2", "h3", "b", "strong"}
@@ -25,7 +13,10 @@ def parse_html(content):
     #Extract all visible text and important text from HTML.
 
 
-    soup = BeautifulSoup(content, "html.parser")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+        warnings.simplefilter("ignore", MarkupResemblesLocatorWarning)
+        soup = BeautifulSoup(content, "html.parser")
 
     # remove irrelevant tags that may contain non-visible text or scripts
     for tag in soup(IGNORED_TAGS):
@@ -37,8 +28,8 @@ def parse_html(content):
     # Iterate through all text nodes in the HTML document.
     for text_node in soup.find_all(string=True):
 
-        # Skip comments and empty text nodes.
-        if isinstance(text_node, Comment):
+        # Skip document metadata that the parser represents as strings.
+        if isinstance(text_node, (Comment, Declaration, Doctype, ProcessingInstruction)):
             continue
 
         text = str(text_node).strip()
