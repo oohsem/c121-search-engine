@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import shutil
 from collections import Counter
@@ -21,6 +22,7 @@ from indexer import (
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 DATASET_DIR = PROJECT_DIR / "dataset"
+LARGE_DOCUMENT_BYTES = 8 * 1024 * 1024
 
 def positive_int(value):
     try:
@@ -81,7 +83,7 @@ def read_document(file_path, dataset_dir):
         return None, "unusable_url"
 
     content = data.get("content")
-    if not isinstance(content, str) or not content.strip():
+    if not isinstance(content, str) or not content or content.isspace():
         return None, "empty_content"
 
     return {
@@ -174,6 +176,13 @@ def main(argv=None):
     print("\nFinal index saved at:", final_dir / "index.jsonl")
 
 
+def spill_index(index, partial_dir, count, postings):
+    count += 1
+    print(f"Writing partial index {count}: {postings} postings")
+    save_partial_index(index, partial_dir, count)
+    return count
+
+
 def build_generation(args, dataset_dir, final_dir, partial_dir):
     max_docs = args.max_docs
     index_path = final_dir / "index.jsonl"
@@ -207,6 +216,19 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
                 if document_count >= max_docs:
                     break
 
+            try:
+                oversized = file_path.stat().st_size >= LARGE_DOCUMENT_BYTES
+            except OSError:
+                skipped_by_reason["unreadable_file"] += 1
+                continue
+            if oversized:
+                if inverted_index:
+                    partial_count = spill_index(
+                        inverted_index, partial_dir, partial_count, postings_in_partial)
+                    docs_in_partial = postings_in_partial = 0
+                # Release old parser trees before decoding an unusually large page.
+                gc.collect()
+
             document, reason = read_document(file_path, dataset_dir)
             if reason is not None:
                 skipped_by_reason[reason] += 1
@@ -214,13 +236,14 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
             doc_id = document["doc_id"]
             url = document["url"]
-            all_text, important_text = parse_html(document["content"])
-            if not all_text.strip():
+            all_text, important_text = parse_html(document.pop("content"))
+            if not all_text or all_text.isspace():
                 skipped_by_reason["empty_content"] += 1
                 continue
 
             # Add document terms to the inverted index.
             postings_in_partial += build_index(all_text, important_text, document_count, inverted_index)
+            del all_text, important_text
             docs_in_partial += 1
 
             # Save document metadata.
@@ -239,16 +262,12 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
             if inverted_index and (
                 docs_in_partial >= DOCS_PER_PARTIAL or postings_in_partial >= args.max_postings
             ):
-                partial_count += 1
-                print(f"Writing partial index {partial_count}: {postings_in_partial} postings")
-                save_partial_index(inverted_index, partial_dir, partial_count)
-                docs_in_partial = 0
-                postings_in_partial = 0
+                partial_count = spill_index(
+                    inverted_index, partial_dir, partial_count, postings_in_partial)
+                docs_in_partial = postings_in_partial = 0
 
     if inverted_index:
-        partial_count += 1
-        print(f"Writing final partial index {partial_count}: {postings_in_partial} postings")
-        save_partial_index(inverted_index, partial_dir, partial_count)
+        partial_count = spill_index(inverted_index, partial_dir, partial_count, postings_in_partial)
 
     print("\nDocument processing complete.")
 

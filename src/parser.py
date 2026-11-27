@@ -10,8 +10,9 @@ IGNORED_TAGS = {"script", "style", "noscript", "template"}
 
 
 def parse_html(content):
-    #Extract all visible text and important text from HTML.
-
+    # Plain text needs no HTML tree. Preserve its normal surrounding trim.
+    if "<" not in content and "&" not in content:
+        return content.strip(), ""
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)

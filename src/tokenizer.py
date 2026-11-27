@@ -1,4 +1,5 @@
 
+from collections import Counter
 from functools import lru_cache
 
 from nltk.stem import PorterStemmer
@@ -8,26 +9,24 @@ stemmer = PorterStemmer()
 stem_word = lru_cache(maxsize=32768)(stemmer.stem)
 
 
-def tokenize(text):
-    tokens = []
+def iter_tokens(text):
     current_token = ""
-
     for character in text:
-        # Keep letters and numbers together as tokens.
         if character.isalnum():
             current_token += character.lower()
-
-        else:
-            # Save the token whenever we encounter a separator.
-            if current_token:
-                tokens.append(current_token)
-                current_token = ""
-
-    # Save the last token if the text ends with an alphanumeric character.
+        elif current_token:
+            yield current_token
+            current_token = ""
     if current_token:
-        tokens.append(current_token)
+        yield current_token
 
-    return tokens
+
+def tokenize(text):
+    return list(iter_tokens(text))
+
+
+def count_terms(text):
+    return Counter(stem_word(token) for token in iter_tokens(text))
 
 
 def stem_tokens(tokens):

@@ -3,31 +3,23 @@ import json
 import heapq
 
 from pathlib import Path
-from collections import Counter
 from contextlib import ExitStack
 from tempfile import TemporaryDirectory
 
-from tokenizer import process_text
+from tokenizer import count_terms
 
 
 # Spill when either bound is reached.
 DOCS_PER_PARTIAL = 5000
-POSTINGS_PER_PARTIAL = 250_000
+POSTINGS_PER_PARTIAL = 100_000
 
 
 def build_index(all_text, important_text, doc_num, index):
 
-    # Process all text in the document.
-    tokens = process_text(all_text)
-
-    # Process only important text.
-    important_tokens = process_text(important_text)
-
-    # Count how many times each term appears.
-    term_frequencies = Counter(tokens)
-
-    # Count how many times each term appears in important text.
-    important_frequencies = Counter(important_tokens)
+    # Count stems as they are read so a large document does not retain
+    # a list of every token and a second list of every stem.
+    term_frequencies = count_terms(all_text)
+    important_frequencies = count_terms(important_text)
 
     # Add each term to the inverted index.
     for term, frequency in term_frequencies.items():
