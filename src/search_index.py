@@ -41,6 +41,7 @@ class IndexReader:
         self.include_sources = include_sources
         self.file = None
         self._file_lock = Lock()
+        self._hits_lock = Lock()
 
     def __enter__(self):
         if self.file is not None:
@@ -152,7 +153,8 @@ class IndexReader:
         if self.link_graph is None:
             return {}
         try:
-            return self.link_graph.scores(documents)
+            with self._hits_lock:
+                return self.link_graph.scores(documents)
         except (sqlite3.Error, ValueError, TypeError) as error:
             raise IndexArtifactError(f"Cannot read the HITS link graph: {error}") from error
 
