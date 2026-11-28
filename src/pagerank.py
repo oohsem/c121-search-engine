@@ -5,6 +5,7 @@ from array import array
 from tempfile import TemporaryFile
 
 from compact_format import PAGERANK_SCORE
+from hits import write_hits_graph
 from links import PageLinks as PageLinks, canonical_url, resolve_link as resolve_link
 
 
@@ -52,7 +53,7 @@ def iter_edges(graph):
         yield from EDGE.iter_unpack(block)
 
 
-def write_pagerank(documents_path, links_path, scores_path):
+def write_pagerank(documents_path, links_path, scores_path, *, hits_path=None):
     """Rank only indexed URLs and store one score for each indexed document."""
     node_ids = {}
     link_rows = []
@@ -92,6 +93,8 @@ def write_pagerank(documents_path, links_path, scores_path):
                     graph.write(EDGE.pack(source, target))
 
             ranks = solve(degrees, lambda: iter_edges(graph), 0.85, 50, 1e-9)
+            if hits_path is not None:
+                write_hits_graph(hits_path, document_nodes, degrees, iter_edges(graph))
 
     with scores_path.open("wb") as scores:
         for node in document_nodes:

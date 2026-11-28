@@ -22,6 +22,7 @@ from compact_format import (
 )
 
 from duplicates import DUPLICATE_GROUPS, read_groups
+from hits import HITS_GRAPH, LinkGraph
 from index_storage import resolve_index_dir
 from positions import PositionIndex
 
@@ -99,6 +100,9 @@ class IndexReader:
                 anchors = open_anchors(directory / ANCHOR_INDEX)
                 if anchors is not None:
                     handles.callback(anchors.close)
+                link_graph = LinkGraph.open(compact / HITS_GRAPH) if compact is not None else None
+                if link_graph is not None:
+                    handles.callback(link_graph.close)
                 resources = handles.pop_all()
         except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
             raise IndexArtifactError(
@@ -117,6 +121,7 @@ class IndexReader:
         self.file = file
         self.positions = positions
         self.anchors = anchors
+        self.link_graph = link_graph
         self._resources = resources
         self.duplicate_groups = duplicate_groups
         return self
@@ -140,6 +145,16 @@ class IndexReader:
                 yield doc, sources
         except (sqlite3.Error, ValueError) as error:
             raise IndexArtifactError(f"Cannot read anchor postings for {term!r}: {error}") from error
+
+    def hits_scores(self, documents):
+        if self.file is None:
+            raise RuntimeError("Open the index before reading its link graph.")
+        if self.link_graph is None:
+            return {}
+        try:
+            return self.link_graph.scores(documents)
+        except (sqlite3.Error, ValueError, TypeError) as error:
+            raise IndexArtifactError(f"Cannot read the HITS link graph: {error}") from error
 
     def get_postings(self, term):
         if self.file is None:

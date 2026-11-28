@@ -5,6 +5,7 @@ from heapq import heapify, heappop, nsmallest
 from math import isfinite, sqrt
 from operator import itemgetter
 
+from hits import HITS_ROOT_SIZE
 from positions import quoted_phrases, smallest_window
 from search_index import IndexArtifactError
 from term_weights import (
@@ -18,6 +19,7 @@ from tokenizer import process_text
 
 DEFAULT_IMPORTANT_BOOST = 0.35
 DEFAULT_ANCHOR_WEIGHT = 0.12
+DEFAULT_HITS_WEIGHT = 0.15
 DEFAULT_PAGERANK_WEIGHT = 0.08
 DEFAULT_PROXIMITY_WEIGHT = 0.10
 DEFAULT_SHORT_PAGE_FLOOR = 85
@@ -60,7 +62,7 @@ class Ranker:
                  prefer_coverage=True, short_page_floor=DEFAULT_SHORT_PAGE_FLOOR,
                  pagerank_weight=DEFAULT_PAGERANK_WEIGHT,
                  proximity_weight=DEFAULT_PROXIMITY_WEIGHT, collapse_duplicates=True,
-                 anchor_weight=DEFAULT_ANCHOR_WEIGHT):
+                 anchor_weight=DEFAULT_ANCHOR_WEIGHT, hits_weight=DEFAULT_HITS_WEIGHT):
         if not isfinite(important_boost) or important_boost < 0:
             raise ValueError("Important-text boost must be finite and nonnegative.")
         if type(short_page_floor) is not int or short_page_floor < 0:
@@ -71,10 +73,13 @@ class Ranker:
             raise ValueError("Proximity weight must be between zero and one.")
         if not isfinite(anchor_weight) or not 0.0 <= anchor_weight <= 1.0:
             raise ValueError("Anchor text weight must be between zero and one.")
+        if not isfinite(hits_weight) or not 0.0 <= hits_weight <= 1.0:
+            raise ValueError("HITS weight must be between zero and one.")
         self.index = index
         self.duplicate_groups = getattr(index, "duplicate_groups", None) if collapse_duplicates else None
         self.proximity_weight = proximity_weight
         self.anchor_weight = anchor_weight
+        self.hits_weight = hits_weight if getattr(index, "link_graph", None) is not None else 0
         authority = index.pagerank_scores() if pagerank_weight else None
         self.authority_bonus = (
             array("d", (pagerank_weight * rank / (1.0 + rank) for rank in authority))
@@ -161,21 +166,22 @@ class Ranker:
             return self._rank_phrases(terms, phrases, top_k)
         scores, matches = self._score_query(terms)
         anchor_only = self._add_anchor_scores(terms, scores)
+        limit = max(top_k, HITS_ROOT_SIZE) if self.hits_weight else top_k
 
         def order(item):
             return (item[0] in anchor_only, *rank_order(item, matches))
 
-        baseline = self._top_unique(scores.items(), order, top_k)
+        baseline = self._top_unique(scores.items(), order, limit)
         positions = self.index.positions
         term_count = sum(terms.values())
         if positions is None or not self.proximity_weight or term_count < 2:
-            return baseline
+            return self._finish_rank(baseline, order, top_k, anchor_only)
         locations = {term: self.index.posting_range(term) for term in terms}
         if None in locations.values():
-            return baseline
+            return self._finish_rank(baseline, order, top_k, anchor_only)
 
         # Include the unique baseline hits even if duplicates fill the shortlist.
-        candidates = dict(nsmallest(max(top_k, PROXIMITY_SHORTLIST), scores.items(), key=order))
+        candidates = dict(nsmallest(max(limit, PROXIMITY_SHORTLIST), scores.items(), key=order))
         candidates.update(baseline)
         rescored = []
         for doc, score in candidates.items():
@@ -185,7 +191,20 @@ class Ranker:
                 if span is not None:
                     score += self.proximity_weight * term_count / span
             rescored.append((doc, score))
-        return self._top_unique(rescored, order, top_k)
+        ranked = self._top_unique(rescored, order, limit)
+        return self._finish_rank(ranked, order, top_k, anchor_only)
+
+    def _finish_rank(self, ranked, order, top_k, anchor_only=()):
+        if not self.hits_weight or not ranked:
+            return ranked[:top_k]
+        graph_scores = self.index.hits_scores(doc for doc, _ in ranked if doc not in anchor_only)
+        if not graph_scores:
+            return ranked[:top_k]
+        reranked = []
+        for doc, score in ranked:
+            hub, authority = graph_scores.get(doc, (0.0, 0.0))
+            reranked.append((doc, score + self.hits_weight * (0.2 * hub + 0.8 * authority)))
+        return nsmallest(top_k, reranked, key=order)
 
     def _result_keys(self, doc):
         url = self.index.document_url(str(doc))
@@ -222,6 +241,7 @@ class Ranker:
         return best
 
     def _rank_phrases(self, terms, phrases, top_k):
+        limit = max(top_k, HITS_ROOT_SIZE) if self.hits_weight else top_k
         positions = self.index.positions
         if positions is None:
             raise PhraseIndexRequired(
@@ -274,7 +294,7 @@ class Ranker:
             return rank_order(item, matches)
 
         if verify_first:
-            return self._top_unique(scores.items(), order, top_k)
+            return self._finish_rank(self._top_unique(scores.items(), order, limit), order, top_k)
 
         candidates = [order(item) for item in scores.items()]
         heapify(candidates)
@@ -283,8 +303,8 @@ class Ranker:
         results = []
 
         for _ in range(PHRASE_RANDOM_LOOKUPS):
-            if not candidates or len(results) == top_k:
-                return results
+            if not candidates or len(results) == limit:
+                return self._finish_rank(results, order, top_k)
             _, negative_score, doc = heappop(candidates)
             url, group = self._result_keys(doc)
             if not url or url in seen_urls or group in seen_groups:
@@ -294,8 +314,8 @@ class Ranker:
                 seen_groups.add(group)
                 results.append((doc, -negative_score))
 
-        if len(results) == top_k:
-            return results
+        if len(results) == limit:
+            return self._finish_rank(results, order, top_k)
 
         # Rare phrases made of frequent words may need many candidates.
         # Scan the remaining postings in document order to reuse term cursors.
@@ -313,14 +333,14 @@ class Ranker:
             ):
                 remaining[key] = item
         if self.duplicate_groups is None:
-            results.extend((doc, -score) for _, score, doc in nsmallest(top_k - len(results), remaining.values()))
-            return results
+            results.extend((doc, -score) for _, score, doc in nsmallest(limit - len(results), remaining.values()))
+            return self._finish_rank(results, order, top_k)
 
         results.extend(self._top_unique(
             ((doc, -score) for _, score, doc in remaining.values()),
-            order, top_k - len(results), seen_urls, seen_groups,
+            order, limit - len(results), seen_urls, seen_groups,
         ))
-        return results
+        return self._finish_rank(results, order, top_k)
 
     def ranked_documents(self, query, top_k=5):
         return self._rank(query_terms(query, self.filter_stopwords), top_k, quoted_phrases(query))

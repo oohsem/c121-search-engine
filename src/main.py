@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from anchors import ANCHOR_INDEX, write_anchors
 from duplicates import DUPLICATE_GROUPS, DuplicateDetector
+from hits import HITS_GRAPH
 from index_storage import publish_generation
 from links import PageLinks, canonical_url
 from parser import parse_html
@@ -337,7 +338,10 @@ def build_generation(args, dataset_dir, final_dir, partial_dir):
 
     # Build the compact disk-backed index required by Milestone 3.
     optimize(final_dir)
-    write_pagerank(documents_path, links_path, final_dir / "optimized" / "pagerank.bin")
+    write_pagerank(
+        documents_path, links_path, final_dir / "optimized" / "pagerank.bin",
+        hits_path=final_dir / "optimized" / HITS_GRAPH,
+    )
 
 
 if __name__ == "__main__":

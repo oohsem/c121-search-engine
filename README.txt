@@ -72,6 +72,13 @@ Additional ranking signals
 PageRank is computed offline from the indexed link graph and added to ranked
 search. Use --pagerank-weight 0 to disable it.
 
+HITS uses incoming and outgoing links around the top 40 query matches. The
+neighborhood adds up to 20 neighbors per direction for each match and stops
+at 300 pages. Hub and authority scores start at one, alternate updates,
+and are normalized to sum to one for up to ten rounds. The ranker adds a
+small boost to eligible results, with more weight on authority. Use
+--hits-weight 0 to disable it.
+
 Word positions support exact phrases and reward shorter matching windows in
 unquoted queries. Use --proximity-weight 0 to disable the window boost.
 
